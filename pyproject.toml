@@ -1,0 +1,11 @@
+[project]
+name = "exchange-event"
+version = "0.1.0"
+description = "Automated airdrop event participation system for Korean exchanges"
+requires-python = ">=3.8"
+dependencies = [
+    "ccxt>=4.1.0",
+    "python-dotenv>=1.0.0",
+    "schedule>=1.2.0",
+    "requests>=2.31.0",
+]
