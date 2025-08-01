@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 
 from exchanges.bithumb import BithumbExchange
+from exchanges.upbit import UpbitExchange
 
 # 환경 변수 로드
 load_dotenv()
@@ -52,7 +53,7 @@ class AirdropBot:
         """AirdropBot을 초기화합니다.
         
         Args:
-            exchange_name: 거래소 이름 (기본값: 'bithumb')
+            exchange_name: 거래소 이름 ('bithumb' 또는 'upbit')
         """
         self.exchange_name = exchange_name
         self.accounts = self._load_accounts()
@@ -64,39 +65,72 @@ class AirdropBot:
         """환경 변수에서 계정 정보를 로드합니다.
         
         환경 변수에서 API 키를 찾아 계정 정보를 생성합니다.
-        BITHUMB_API_KEY_1, BITHUMB_API_KEY_2 형식의 다중 계정과
-        BITHUMB_API_KEY 형식의 단일 계정을 모두 지원합니다.
+        빗썸: BITHUMB_API_KEY_1, BITHUMB_API_KEY_2 형식의 다중 계정과
+              BITHUMB_API_KEY 형식의 단일 계정을 모두 지원합니다.
+        업비트: UPBIT_ACCESS_KEY_1, UPBIT_ACCESS_KEY_2 형식의 다중 계정과
+               UPBIT_ACCESS_KEY 형식의 단일 계정을 모두 지원합니다.
         
         Returns:
             계정 정보 딕셔너리의 리스트
         """
         accounts = []
-        account_num = 1
         
-        while True:
-            # BITHUMB_API_KEY_1, BITHUMB_API_KEY_2, ... 형식으로 찾기
-            api_key = os.getenv(f'BITHUMB_API_KEY_{account_num}')
-            api_secret = os.getenv(f'BITHUMB_SECRET_KEY_{account_num}')
+        if self.exchange_name == 'upbit':
+            # 업비트도 다중 계정 지원
+            account_num = 1
             
-            if not api_key or not api_secret:
-                # 번호 없는 기본 키도 확인
-                if account_num == 1:
-                    api_key = os.getenv('BITHUMB_API_KEY')
-                    api_secret = os.getenv('BITHUMB_SECRET_KEY')
-                    if api_key and api_secret:
-                        accounts.append({
-                            'account_id': 'main',
-                            'api_key': api_key.strip("'\""),
-                            'api_secret': api_secret.strip("'\"")
-                        })
-                break
+            while True:
+                # UPBIT_ACCESS_KEY_1, UPBIT_ACCESS_KEY_2, ... 형식으로 찾기
+                access_key = os.getenv(f'UPBIT_ACCESS_KEY_{account_num}')
+                secret_key = os.getenv(f'UPBIT_SECRET_KEY_{account_num}')
+                
+                if not access_key or not secret_key:
+                    # 번호 없는 기본 키도 확인
+                    if account_num == 1:
+                        access_key = os.getenv('UPBIT_ACCESS_KEY')
+                        secret_key = os.getenv('UPBIT_SECRET_KEY')
+                        if access_key and secret_key:
+                            accounts.append({
+                                'account_id': 'main',
+                                'api_key': access_key.strip("'\""),
+                                'api_secret': secret_key.strip("'\"")
+                            })
+                    break
+                
+                accounts.append({
+                    'account_id': f'account_{account_num}',
+                    'api_key': access_key.strip("'\""),
+                    'api_secret': secret_key.strip("'\"")
+                })
+                account_num += 1
+        else:
+            # 빗썸은 다중 계정 지원
+            account_num = 1
             
-            accounts.append({
-                'account_id': f'account_{account_num}',
-                'api_key': api_key.strip("'\""),
-                'api_secret': api_secret.strip("'\"")
-            })
-            account_num += 1
+            while True:
+                # BITHUMB_API_KEY_1, BITHUMB_API_KEY_2, ... 형식으로 찾기
+                api_key = os.getenv(f'BITHUMB_API_KEY_{account_num}')
+                api_secret = os.getenv(f'BITHUMB_SECRET_KEY_{account_num}')
+                
+                if not api_key or not api_secret:
+                    # 번호 없는 기본 키도 확인
+                    if account_num == 1:
+                        api_key = os.getenv('BITHUMB_API_KEY')
+                        api_secret = os.getenv('BITHUMB_SECRET_KEY')
+                        if api_key and api_secret:
+                            accounts.append({
+                                'account_id': 'main',
+                                'api_key': api_key.strip("'\""),
+                                'api_secret': api_secret.strip("'\"")
+                            })
+                    break
+                
+                accounts.append({
+                    'account_id': f'account_{account_num}',
+                    'api_key': api_key.strip("'\""),
+                    'api_secret': api_secret.strip("'\"")
+                })
+                account_num += 1
         
         logger.info(f"로드된 계정 수: {len(accounts)}")
         return accounts
@@ -127,7 +161,11 @@ class AirdropBot:
                 'apiKey': account_info['api_key'],
                 'secret': account_info['api_secret']
             }
-            exchange = BithumbExchange(credentials)
+            
+            if self.exchange_name == 'upbit':
+                exchange = UpbitExchange(credentials)
+            else:
+                exchange = BithumbExchange(credentials)
             
             # 심볼 포맷 조정
             if '/' not in symbol:
@@ -147,6 +185,7 @@ class AirdropBot:
                 logger.error(f"[{account_id}] 매수 실패")
                 self.results.put({
                     'account': account_id,
+                    'symbol': symbol,
                     'success': False,
                     'error': '매수 실패'
                 })
@@ -157,6 +196,12 @@ class AirdropBot:
             # 3. 대기
             time.sleep(self.wait_time)
             
+            # 업비트의 경우 주문 체결 확인 필요
+            if self.exchange_name == 'upbit' and buy_order.get('status') == 'open':
+                logger.info(f"[{account_id}] 업비트 주문 체결 대기 중...")
+                # 추가 대기
+                time.sleep(3)
+            
             # 4. 잔고 확인 및 전량 매도
             coin = symbol.split('/')[0]
             balance = None
@@ -164,7 +209,12 @@ class AirdropBot:
             
             # 잔고 확인 재시도
             for retry in range(3):
-                balance = exchange.get_balance(coin)
+                if self.exchange_name == 'upbit':
+                    # 업비트는 전체 잔고 조회
+                    balance = exchange.get_balance()
+                else:
+                    # 빗썸은 특정 코인 잔고 조회
+                    balance = exchange.get_balance(coin)
                 
                 if balance and coin in balance:
                     available_amount = balance[coin]['free']
@@ -178,6 +228,7 @@ class AirdropBot:
                 logger.error(f"[{account_id}] {coin} 잔고 없음")
                 self.results.put({
                     'account': account_id,
+                    'symbol': symbol,
                     'success': False,
                     'error': '매도할 잔고 없음'
                 })
@@ -191,6 +242,7 @@ class AirdropBot:
                 logger.error(f"[{account_id}] 매도 실패")
                 self.results.put({
                     'account': account_id,
+                    'symbol': symbol,
                     'success': False,
                     'error': '매도 실패'
                 })
@@ -206,6 +258,7 @@ class AirdropBot:
             
             self.results.put({
                 'account': account_id,
+                'symbol': symbol,
                 'success': True,
                 'buy_order': buy_order,
                 'sell_order': sell_order
@@ -218,25 +271,26 @@ class AirdropBot:
             logger.error(f"[{account_id}] 오류 발생: {e}")
             self.results.put({
                 'account': account_id,
+                'symbol': symbol,
                 'success': False,
                 'error': str(e)
             })
             return False
     
-    def participate_all_accounts(self, symbol: str, max_workers: int = 5) -> None:
+    def participate_all_accounts(self, symbols: List[str], max_workers: int = 5) -> None:
         """모든 계정으로 동시에 이벤트 참여합니다.
         
         ThreadPoolExecutor를 사용하여 여러 계정으로 동시에
         에어드랍 이벤트에 참여합니다.
         
         Args:
-            symbol: 거래할 코인 심볼 (예: 'BTC', 'ETH')
+            symbols: 거래할 코인 심볼 리스트 (예: ['BTC', 'ETH'])
             max_workers: 동시 실행할 최대 스레드 수 (기본값: 5)
         """
         logger.info(f"=== 다중 계정 에어드랍 시작 ===")
         logger.info(f"참여 계정 수: {len(self.accounts)}")
-        logger.info(f"거래 심볼: {symbol}")
-        logger.info(f"거래 금액: {self.trade_amount:,.0f} KRW")
+        logger.info(f"거래 심볼: {', '.join(symbols)}")
+        logger.info(f"거래 금액: {self.trade_amount:,.0f} KRW (코인당)")
         
         if not self.accounts:
             logger.error("등록된 계정이 없습니다")
@@ -244,33 +298,54 @@ class AirdropBot:
         
         # ThreadPoolExecutor로 동시 실행
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 각 계정별로 작업 제출
-            futures = {
-                executor.submit(self.participate_event_single, account, symbol): account
-                for account in self.accounts
-            }
+            # 각 계정과 각 코인별로 작업 제출
+            futures = {}
+            for account in self.accounts:
+                for symbol in symbols:
+                    future = executor.submit(self.participate_event_single, account, symbol)
+                    futures[future] = (account, symbol)
             
             # 완료된 작업 처리
             for future in as_completed(futures):
-                account = futures[future]
+                account, symbol = futures[future]
                 try:
                     future.result()
                 except Exception as e:
-                    logger.error(f"[{account['account_id']}] 작업 실행 중 오류: {e}")
+                    logger.error(f"[{account['account_id']}] {symbol} 작업 실행 중 오류: {e}")
         
         # 결과 집계
         logger.info("\n=== 실행 결과 ===")
         success_count = 0
         fail_count = 0
         
+        coin_results = {}  # 코인별 결과 저장
+        
         while not self.results.empty():
             result = self.results.get()
+            symbol = result.get('symbol', 'Unknown')
+            
+            if symbol not in coin_results:
+                coin_results[symbol] = {'success': 0, 'fail': 0}
+            
             if result['success']:
                 success_count += 1
-                logger.info(f"✅ {result['account']}: 성공")
+                coin_results[symbol]['success'] += 1
+                logger.info(f"✅ {result['account']} - {symbol}: 성공")
             else:
                 fail_count += 1
-                logger.error(f"❌ {result['account']}: 실패 ({result.get('error', '알 수 없는 오류')})")
+                coin_results[symbol]['fail'] += 1
+                logger.error(f"❌ {result['account']} - {symbol}: 실패 ({result.get('error', '알 수 없는 오류')})")
         
-        logger.info(f"\n총 {len(self.accounts)}개 계정 중 성공: {success_count}, 실패: {fail_count}")
+        # 전체 결과 요약
+        total_tasks = len(self.accounts) * len(symbols)
+        logger.info(f"\n=== 전체 결과 요약 ===")
+        logger.info(f"총 작업 수: {total_tasks} (계정 {len(self.accounts)}개 × 코인 {len(symbols)}개)")
+        logger.info(f"성공: {success_count}, 실패: {fail_count}")
+        
+        # 코인별 결과
+        if len(symbols) > 1:
+            logger.info("\n코인별 결과:")
+            for symbol in symbols:
+                if symbol in coin_results:
+                    logger.info(f"  {symbol}: 성공 {coin_results[symbol]['success']}, 실패 {coin_results[symbol]['fail']}")
 
