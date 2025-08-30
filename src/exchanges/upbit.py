@@ -9,29 +9,7 @@ class UpbitExchange(BaseExchange):
     def __init__(self, api_credentials):
         super().__init__('upbit', api_credentials)
         
-    def get_usdt_krw_price(self):
-        """
-        USDT/KRW 가격 조회
-        
-        Returns:
-            float: USDT 원화 가격
-        """
-        try:
-            ticker = self.exchange.fetch_ticker('USDT/KRW')
-            return ticker['last']
-        except Exception as e:
-            self.logger.error(f"USDT/KRW 가격 조회 실패: {e}")
-            return None
-    
-    def get_funding_rate(self, symbol):
-        """
-        펀딩 수수료율 조회 (업비트는 현물 거래소라 해당 없음)
-        
-        Returns:
-            float: 0
-        """
-        return 0
-    
+
     def get_krw_markets(self):
         """
         KRW 마켓 코인 목록 조회
