@@ -1,17 +1,12 @@
-"""
-빗썸 거래소 클래스
-"""
 import hmac
 import hashlib
 import base64
 import time
 import requests
-import json
 from urllib.parse import urlencode
 from .base import BaseExchange
 
 class BithumbExchange(BaseExchange):
-    """빗썸 거래소 구현"""
     
     def __init__(self, api_credentials):
         super().__init__('bithumb', api_credentials)
@@ -30,14 +25,14 @@ class BithumbExchange(BaseExchange):
         
         return signature, nonce
     
-    def _request(self, endpoint, params=None, retry_count=3):
+    def _request(self, endpoint, params=None):
         """
         빗썸 API 요청 (재시도 로직 포함)
         """
         if params is None:
             params = {}
         
-        for attempt in range(retry_count):
+        for attempt in range(3):
             try:
                 signature, nonce = self._generate_signature(endpoint, params)
                 
@@ -60,15 +55,9 @@ class BithumbExchange(BaseExchange):
                 
                 return result
                 
-            except requests.exceptions.Timeout:
-                self.logger.warning(f"요청 타임아웃 ({attempt + 1}/{retry_count})")
-                if attempt < retry_count - 1:
-                    time.sleep(2 ** attempt)  # 지수 백오프
-                continue
-                
             except Exception as e:
-                self.logger.error(f"API 요청 실패 ({attempt + 1}/{retry_count}): {e}")
-                if attempt < retry_count - 1:
+                self.logger.error(f"API 요청 실패 ({attempt + 1}/{3}): {e}")
+                if attempt < 2:
                     time.sleep(2 ** attempt)
                 continue
         
@@ -82,7 +71,6 @@ class BithumbExchange(BaseExchange):
             list: KRW 마켓 심볼 리스트
         """
         try:
-            # 빗썸은 기본적으로 모든 마켓이 KRW
             response = requests.get(f"{self.api_url}/public/ticker/ALL_KRW")
             data = response.json()
             
@@ -148,24 +136,7 @@ class BithumbExchange(BaseExchange):
         except Exception as e:
             self.logger.error(f"가격 정보 조회 실패: {e}")
             return None
-    
-    def get_usdt_krw_price(self):
-        """
-        USDT/KRW 가격 조회 (빗썸은 USDT 거래 미지원)
-        
-        Returns:
-            float: None
-        """
-        return None
-    
-    def get_funding_rate(self, symbol):
-        """
-        펀딩 수수료율 조회 (빗썸은 현물 거래소라 해당 없음)
-        
-        Returns:
-            float: 0
-        """
-        return 0
+
     
     def get_balance(self, currency=None):
         """
@@ -192,7 +163,6 @@ class BithumbExchange(BaseExchange):
                         'total': float(data[f'total_{currency.lower()}'])
                     }
                 else:
-                    # 전체 잔고 파싱
                     # KRW 잔고
                     if 'total_krw' in data:
                         balances['KRW'] = {
@@ -234,9 +204,9 @@ class BithumbExchange(BaseExchange):
         try:
             coin = symbol.split('/')[0]
             
-            # 최소 주문 금액 확인 (1000 KRW)
-            if krw_amount < 1000:
-                self.logger.error(f"주문 금액이 최소 주문 금액(1000 KRW) 미만: {krw_amount:.0f} KRW")
+            # 최소 주문 금액 확인 (5000 KRW)
+            if krw_amount < 5000:
+                self.logger.error(f"주문 금액이 최소 주문 금액(5000 KRW) 미만: {krw_amount:.0f} KRW")
                 return None
             
             # 현재가 조회하여 수량 계산
