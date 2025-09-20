@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta
 from airdrop_event import AirdropBot
 import schedule
+import pytz
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,21 +19,10 @@ def main() -> None:
     사용자 입력을 받아 에어드랍 봇을 설정하고 실행합니다.
     """
     logger.info("=== 에어드랍 이벤트(사고 팔기) 자동 참여 시스템 ===")
-    logger.info("(업비트/빗썸 지원)")
+    logger.info("(빗썸 전용)")
     
-    while True:
-        exchange_choice = input("\n거래소를 선택하세요 (1: 업비트, 2: 빗썸): ").strip()
-        
-        if exchange_choice == '1':
-            exchange_name = 'upbit'
-            logger.info("업비트 거래소를 선택했습니다.")
-            break
-        elif exchange_choice == '2':
-            exchange_name = 'bithumb'
-            logger.info("빗썸 거래소를 선택했습니다.")
-            break
-        else:
-            logger.error("잘못된 선택입니다. 1(업비트) 또는 2(빗썸)를 입력하세요.")
+    exchange_name = 'bithumb'
+    logger.info("빗썸 거래소에서 이벤트를 진행합니다.")
     
     bot = AirdropBot(exchange_name)
     
@@ -40,26 +30,15 @@ def main() -> None:
         logger.error("등록된 계정이 없습니다.")
         logger.info("\n.env 파일에 다음 형식으로 API 키를 추가하세요:")
         
-        if exchange_name == 'upbit':
-            logger.info("\n[업비트 단일 계정]")
-            logger.info("UPBIT_ACCESS_KEY='your_access_key'")
-            logger.info("UPBIT_SECRET_KEY='your_secret_key'")
-            logger.info("\n[업비트 다중 계정]")
-            logger.info("UPBIT_ACCESS_KEY_1='your_access_key_1'")
-            logger.info("UPBIT_SECRET_KEY_1='your_secret_key_1'")
-            logger.info("UPBIT_ACCESS_KEY_2='your_access_key_2'")
-            logger.info("UPBIT_SECRET_KEY_2='your_secret_key_2'")
-            logger.info("...")
-        else:
-            logger.info("\n[빗썸 단일 계정]")
-            logger.info("BITHUMB_API_KEY='your_api_key'")
-            logger.info("BITHUMB_SECRET_KEY='your_secret_key'")
-            logger.info("\n[빗썸 다중 계정]")
-            logger.info("BITHUMB_API_KEY_1='your_api_key_1'")
-            logger.info("BITHUMB_SECRET_KEY_1='your_secret_key_1'")
-            logger.info("BITHUMB_API_KEY_2='your_api_key_2'")
-            logger.info("BITHUMB_SECRET_KEY_2='your_secret_key_2'")
-            logger.info("...")
+        logger.info("\n[빗썸 단일 계정]")
+        logger.info("BITHUMB_API_KEY='your_api_key'")
+        logger.info("BITHUMB_SECRET_KEY='your_secret_key'")
+        logger.info("\n[빗썸 다중 계정]")
+        logger.info("BITHUMB_API_KEY_1='your_api_key_1'")
+        logger.info("BITHUMB_SECRET_KEY_1='your_secret_key_1'")
+        logger.info("BITHUMB_API_KEY_2='your_api_key_2'")
+        logger.info("BITHUMB_SECRET_KEY_2='your_secret_key_2'")
+        logger.info("...")
         return
     
     # 계정 정보 출력
@@ -145,11 +124,9 @@ def main() -> None:
         max_workers = int(input(f"동시 실행할 최대 계정 수 (기본: 5, 최대: {len(selected_accounts)}): ").strip() or "5")
         max_workers = min(max_workers, len(selected_accounts))
     
-    # 소액 정리 옵션 (빗썸만)
-    cleanup_small_holdings = False
-    if exchange_name == 'bithumb':
-        cleanup_option = input("\n대기 중 5천원 이하 코인 정리를 하시겠습니까? (y/n): ").strip().lower()
-        cleanup_small_holdings = (cleanup_option == 'y')
+    # 소액 정리 옵션
+    cleanup_option = input("\n대기 중 5천원 이하 코인 정리를 하시겠습니까? (y/n): ").strip().lower()
+    cleanup_small_holdings = (cleanup_option == 'y')
     
     # 설정 확인
     logger.info("\n=== 설정 확인 ===")
@@ -176,32 +153,18 @@ def main() -> None:
         logger.info("취소되었습니다.")
         return
     
-    # 1시간 후 실행 대기
-    wait_hours = 0
-    wait_seconds = wait_hours * 3600
-    start_time = datetime.now() + timedelta(hours=wait_hours)
-    
-    logger.info(f"\n=== {wait_hours}시간 후 실행 예정 ===")
+    # 첫날은 즉시 실행, 이후 12:01 AM KST에 실행
+    logger.info("\n=== 프로그램을 시작합니다 ===")
     logger.info(f"현재 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"실행 시간: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info("대기 중... (중단하려면 Ctrl+C를 누르세요)\n")
-    
-    # 대기 중 진행 상황 표시
-    while wait_seconds > 0:
-        if wait_seconds > 600:  # 10분 이상 남았으면 10분마다 업데이트
-            time.sleep(600)
-            wait_seconds -= 600
-            remaining_hours = wait_seconds // 3600
-            remaining_minutes = (wait_seconds % 3600) // 60
-            logger.info(f"남은 대기 시간: {remaining_hours}시간 {remaining_minutes}분")
-        else:
-            # 10분 미만이면 1분마다 업데이트
-            time.sleep(60)
-            wait_seconds -= 60
-            if wait_seconds > 0:
-                logger.info(f"남은 대기 시간: {wait_seconds // 60}분")
-    
-    logger.info("\n실행 시간이 되었습니다. 프로그램을 시작합니다.\n")
+
+    # KST 타임존 설정
+    kst = pytz.timezone('Asia/Seoul')
+
+    if event_days > 1:
+        logger.info(f"첫날: 즉시 실행")
+        logger.info(f"2일차부터: 매일 오전 12:01 (KST)에 자동 실행")
+
+    logger.info("\n프로그램을 시작합니다.\n")
     
     # 실행
     try:
@@ -209,7 +172,7 @@ def main() -> None:
             # 1회만 실행
             bot.participate_all_accounts(symbols, max_workers, selected_accounts)
             
-            # 소액 정리 옵션 실행 (빗썸만)
+            # 소액 정리 옵션 실행
             if cleanup_small_holdings:
                 logger.info("\n=== 소액 코인 정리 시작 ===")
                 bot.cleanup_all_accounts(max_workers, selected_accounts)
@@ -220,42 +183,77 @@ def main() -> None:
             
             # 실행 카운터
             execution_count = 0
-            
-            def run_event():
+
+            def run_event(is_first_run=False):
                 nonlocal execution_count, cleanup_small_holdings
                 execution_count += 1
+
+                current_time = datetime.now(kst)
                 logger.info(f"\n=== {execution_count}일차 실행 (총 {event_days}일) ===")
-                logger.info(f"실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.info(f"실행 시간: {current_time.strftime('%Y-%m-%d %H:%M:%S')} KST")
+
+                # 첫날이 아니면 wait_time을 2초로 변경
+                if not is_first_run:
+                    original_wait_time = bot.wait_time
+                    bot.wait_time = 2
+                    logger.info(f"스케줄 실행: 대기 시간 {bot.wait_time}초로 설정")
+
                 bot.participate_all_accounts(symbols, max_workers, selected_accounts)
-                
-                # 소액 정리 옵션 실행 (빗썸만)
+
+                # wait_time 복원
+                if not is_first_run:
+                    bot.wait_time = original_wait_time
+
+                # 소액 정리 옵션 실행
                 if cleanup_small_holdings:
                     logger.info("\n=== 소액 코인 정리 시작 ===")
                     bot.cleanup_all_accounts(max_workers, selected_accounts)
                     cleanup_small_holdings = False  # 한 번 실행 후 비활성화
-                
+
                 if execution_count >= event_days:
                     logger.info(f"\n=== 모든 이벤트 완료! ===")
                     logger.info(f"총 {event_days}일 동안 실행했습니다.")
-                    logger.info(f"완료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    logger.info(f"완료 시간: {current_time.strftime('%Y-%m-%d %H:%M:%S')} KST")
                     return schedule.CancelJob
                 else:
                     logger.info(f"\n=== {execution_count}일차 완료 ===")
-                    logger.info(f"다음 실행까지 24시간 대기합니다.")
-            
-            # 첫 실행
-            run_event()
-            
+                    next_run = current_time.replace(hour=0, minute=1, second=0, microsecond=0) + timedelta(days=1)
+                    logger.info(f"다음 실행: {next_run.strftime('%Y-%m-%d %H:%M:%S')} KST")
+
+            # 첫 실행 (즉시)
+            run_event(is_first_run=True)
+
             if execution_count < event_days:
-                # 24시간마다 실행 스케줄 설정
-                schedule.every(24).hours.do(run_event)
-                
-                logger.info(f"\n다음 실행까지 대기 중... (24시간 후)")
+                # 매일 오전 12:01 KST에 실행하도록 스케줄 설정
+                schedule.every().day.at("00:01").do(lambda: run_event(is_first_run=False))
+
+                # 다음 실행 시간 계산
+                now = datetime.now(kst)
+                next_run = now.replace(hour=0, minute=1, second=0, microsecond=0) + timedelta(days=1)
+                time_diff = (next_run - now).total_seconds()
+                hours_until = int(time_diff // 3600)
+                minutes_until = int((time_diff % 3600) // 60)
+
+                logger.info(f"\n다음 실행까지 대기 중...")
+                logger.info(f"다음 실행 예정: {next_run.strftime('%Y-%m-%d %H:%M:%S')} KST")
+                logger.info(f"남은 시간: {hours_until}시간 {minutes_until}분")
                 logger.info("중단하려면 Ctrl+C를 누르세요.")
-                
+
                 while execution_count < event_days:
                     schedule.run_pending()
                     time.sleep(60)  # 1분마다 체크
+
+                    # 매시간 상태 업데이트
+                    if datetime.now().minute == 0:
+                        now = datetime.now(kst)
+                        next_run = now.replace(hour=0, minute=1, second=0, microsecond=0)
+                        if now.hour >= 0 and now.minute >= 1:
+                            next_run += timedelta(days=1)
+                        time_diff = (next_run - now).total_seconds()
+                        if time_diff > 3600:  # 1시간 이상 남았을 때만 표시
+                            hours_until = int(time_diff // 3600)
+                            minutes_until = int((time_diff % 3600) // 60)
+                            logger.info(f"다음 실행까지: {hours_until}시간 {minutes_until}분 남음")
                     
     except KeyboardInterrupt:
         logger.info("\n사용자에 의해 중단되었습니다.")
