@@ -100,7 +100,6 @@ class BithumbExchange(BaseExchange):
         try:
             coin = symbol.split('/')[0]
             
-            # Ticker 정보 조회
             ticker_response = requests.get(f"{self.api_url}/public/ticker/{coin}_KRW")
             ticker_data = ticker_response.json()
             
@@ -110,7 +109,6 @@ class BithumbExchange(BaseExchange):
             
             ticker_info = ticker_data['data']
             
-            # Orderbook 정보 조회하여 매수/매도 호가 가져오기
             orderbook_response = requests.get(f"{self.api_url}/public/orderbook/{coin}_KRW")
             orderbook_data = orderbook_response.json()
             
@@ -171,7 +169,6 @@ class BithumbExchange(BaseExchange):
                             'total': float(data.get('total_krw', 0))
                         }
                     
-                    # 코인 잔고
                     for key in data:
                         if key.startswith('total_') and not key.endswith('krw'):
                             coin = key.replace('total_', '').upper()
@@ -204,9 +201,9 @@ class BithumbExchange(BaseExchange):
         try:
             coin = symbol.split('/')[0]
             
-            # 최소 주문 금액 확인 (5000 KRW)
-            if krw_amount < 5000:
-                self.logger.error(f"주문 금액이 최소 주문 금액(5000 KRW) 미만: {krw_amount:.0f} KRW")
+            # 최소 주문 금액 확인 (5500 KRW)
+            if krw_amount < 5500:
+                self.logger.error(f"주문 금액이 최소 주문 금액(5500 KRW) 미만: {krw_amount:.0f} KRW")
                 return None
             
             # 현재가 조회하여 수량 계산
@@ -222,7 +219,7 @@ class BithumbExchange(BaseExchange):
                 'order_currency': coin,
                 'payment_currency': 'KRW',
                 'units': str(units),
-                'type': 'bid'  # 매수
+                'type': 'bid'
             }
             
             response = self._request('/trade/market_buy', params)

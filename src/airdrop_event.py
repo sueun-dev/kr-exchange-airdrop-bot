@@ -11,7 +11,6 @@ import requests
 from dotenv import load_dotenv
 
 from exchanges.bithumb import BithumbExchange
-from exchanges.upbit import UpbitExchange
 
 
 load_dotenv()
@@ -47,7 +46,7 @@ class AirdropBot:
         """AirdropBot을 초기화합니다.
         
         Args:
-            exchange_name: 거래소 이름 ('bithumb' 또는 'upbit')
+            exchange_name: 거래소 이름 ('bithumb'만 지원)
         """
         self.exchange_name = exchange_name
         self.accounts = self._load_accounts()
@@ -55,22 +54,13 @@ class AirdropBot:
         self.wait_time = int(os.getenv('WAIT_TIME_SECONDS', 2))
         self.results: queue.Queue = queue.Queue()
         
-    def _get_env_keys(self) -> Dict[str, List[str]]:
-        """거래소별 환경변수 키 이름을 반환합니다.
-        
+    def _get_env_keys(self) -> List[str]:
+        """환경변수 키 접두사를 반환합니다.
+
         Returns:
-            환경변수 키 정보 딕셔너리
+            환경변수 키 접두사 리스트
         """
-        if self.exchange_name == 'upbit':
-            return {
-                'single': ['UPBIT_ACCESS_KEY', 'UPBIT_SECRET_KEY'],
-                'multi': ['UPBIT_ACCESS_KEY_', 'UPBIT_SECRET_KEY_']
-            }
-        else:
-            return {
-                'single': ['BITHUMB_API_KEY', 'BITHUMB_SECRET_KEY'],
-                'multi': ['BITHUMB_API_KEY_', 'BITHUMB_SECRET_KEY_']
-            }
+        return ['BITHUMB_API_KEY', 'BITHUMB_SECRET_KEY']
     
     def _create_account_dict(self, account_id: str, api_key: str, api_secret: str) -> Dict[str, str]:
         """계정 정보 딕셔너리를 생성합니다.
@@ -89,46 +79,40 @@ class AirdropBot:
             'api_secret': api_secret.strip("'\"")
         }
     
-    def _load_single_account(self, key_names: List[str]) -> Optional[Dict[str, str]]:
-        """단일 계정 정보를 로드합니다.
-        
-        Args:
-            key_names: API 키와 시크릿 키의 환경변수 이름
-            
-        Returns:
-            계정 정보 또는 None
-        """
-        api_key = os.getenv(key_names[0])
-        api_secret = os.getenv(key_names[1])
-        
-        if api_key and api_secret:
-            return self._create_account_dict('main', api_key, api_secret)
-        return None
-    
-    def _load_multiple_accounts(self, key_prefixes: List[str]) -> List[Dict[str, str]]:
-        """다중 계정 정보를 로드합니다.
-        
+    def _load_all_accounts(self, key_prefixes: List[str]) -> List[Dict[str, str]]:
+        """모든 계정 정보를 로드합니다 (단일 및 다중 계정 모두 지원).
+
         Args:
             key_prefixes: API 키와 시크릿 키의 환경변수 이름 접두사
-            
+
         Returns:
             계정 정보 리스트
         """
         accounts = []
+
+        # 먼저 번호 없는 키 확인 (단일 계정)
+        api_key = os.getenv(key_prefixes[0])
+        api_secret = os.getenv(key_prefixes[1])
+
+        if api_key and api_secret:
+            accounts.append(
+                self._create_account_dict('main', api_key, api_secret)
+            )
+
+        # 번호가 있는 키들 확인 (다중 계정)
         account_num = 1
-        
         while True:
-            api_key = os.getenv(f'{key_prefixes[0]}{account_num}')
-            api_secret = os.getenv(f'{key_prefixes[1]}{account_num}')
-            
+            api_key = os.getenv(f'{key_prefixes[0]}_{account_num}')
+            api_secret = os.getenv(f'{key_prefixes[1]}_{account_num}')
+
             if not api_key or not api_secret:
                 break
-                
+
             accounts.append(
                 self._create_account_dict(f'account_{account_num}', api_key, api_secret)
             )
             account_num += 1
-            
+
         return accounts
     
     def _get_exchange(self, account: Dict[str, str]):
@@ -138,42 +122,26 @@ class AirdropBot:
             account: 계정 정보 딕셔너리
             
         Returns:
-            거래소 객체 (UpbitExchange 또는 BithumbExchange)
+            거래소 객체 (BithumbExchange)
         """
-        if self.exchange_name == 'upbit':
-            api_credentials = {
-                'apiKey': account['api_key'],
-                'secret': account['api_secret']
-            }
-            return UpbitExchange(api_credentials)
-        else:
-            api_credentials = {
-                'apiKey': account['api_key'],
-                'secret': account['api_secret']
-            }
-            return BithumbExchange(api_credentials)
+        api_credentials = {
+            'apiKey': account['api_key'],
+            'secret': account['api_secret']
+        }
+        return BithumbExchange(api_credentials)
     
     def _load_accounts(self) -> List[Dict[str, str]]:
         """환경 변수에서 계정 정보를 로드합니다.
-        
+
         환경 변수에서 API 키를 찾아 계정 정보를 생성합니다.
         단일 계정과 다중 계정을 모두 지원합니다.
-        
+
         Returns:
             계정 정보 딕셔너리의 리스트
         """
-        accounts = []
         env_keys = self._get_env_keys()
-        
-        # 단일 계정 로드
-        single_account = self._load_single_account(env_keys['single'])
-        if single_account:
-            accounts.append(single_account)
-        
-        # 다중 계정 로드
-        multiple_accounts = self._load_multiple_accounts(env_keys['multi'])
-        accounts.extend(multiple_accounts)
-        
+        accounts = self._load_all_accounts(env_keys)
+
         logger.info(f"로드된 계정 수: {len(accounts)}")
         return accounts
     
@@ -191,10 +159,7 @@ class AirdropBot:
             'secret': account_info['api_secret']
         }
         
-        if self.exchange_name == 'upbit':
-            return UpbitExchange(credentials)
-        else:
-            return BithumbExchange(credentials)
+        return BithumbExchange(credentials)
     
     def _execute_buy_order(self, exchange, symbol: str, account_id: str) -> Optional[dict]:
         """매수 주문을 실행합니다.
@@ -317,23 +282,18 @@ class AirdropBot:
         try:
             logger.info(f"[{account_id}] 에어드랍 이벤트 시작")
             
-            # 거래소 초기화
             exchange = self._create_exchange(account_info)
             symbol = f"{symbol.upper()}/KRW"
             
-            # 초기 잔고 로깅 (선택적)
             self._log_balance(exchange, account_id, "초기")
             
-            # 매수 실행
             buy_order = self._execute_buy_order(exchange, symbol, account_id)
             if not buy_order:
                 self._report_result(account_id, symbol, False, error='매수 실패')
                 return False
             
-            # 대기
             time.sleep(self.wait_time)
             
-            # 잔고 확인
             coin = symbol.split('/')[0]
             available_amount = self._wait_for_balance(exchange, coin, account_id)
             
@@ -342,17 +302,14 @@ class AirdropBot:
                                   buy_order=buy_order, error='매도할 잔고 없음')
                 return False
             
-            # 매도 실행
             sell_order = self._execute_sell_order(exchange, symbol, available_amount, account_id)
             if not sell_order:
                 self._report_result(account_id, symbol, False, 
                                   buy_order=buy_order, error='매도 실패')
                 return False
             
-            # 최종 잔고 로깅 (선택적)
             self._log_balance(exchange, account_id, "최종")
             
-            # 성공 보고
             self._report_result(account_id, symbol, True, 
                               buy_order=buy_order, sell_order=sell_order)
             logger.info(f"[{account_id}] 에어드랍 이벤트 완료 ✅")
