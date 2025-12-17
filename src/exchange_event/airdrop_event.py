@@ -1,32 +1,29 @@
+"""Airdrop event participation bot."""
+
+from __future__ import annotations
+
 import logging
 import os
 import queue
-import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
-from typing import Dict, List, Optional
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from typing import Any, Optional, cast
 
 import requests
-from dotenv import load_dotenv
 
-from exchanges.bithumb import BithumbExchange
+from exchange_event.exchanges.base import BaseExchange
+from exchange_event.exchanges.bithumb import BithumbExchange
+from exchange_event.types import AccountInfo, CleanupResults, SmallHolding, TradeResult
 
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-LOG_DIR = Path(__file__).parent.parent / 'logs'
-LOG_DIR.mkdir(exist_ok=True)
+BALANCE_RETRY_COUNT = 3
+BALANCE_RETRY_DELAY_SECONDS = 2
+CLEANUP_BUY_AMOUNT_KRW = 5500
+SMALL_HOLDING_MAX_VALUE_KRW = 5000
+REQUEST_TIMEOUT_SECONDS = 10
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_DIR / 'airdrop_event.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger('AirdropEvent')
 
 class AirdropBot:
     """에어드랍 이벤트 자동 참여 봇.
@@ -49,12 +46,12 @@ class AirdropBot:
             exchange_name: 거래소 이름 ('bithumb'만 지원)
         """
         self.exchange_name = exchange_name
-        self.accounts = self._load_accounts()
+        self.accounts: list[AccountInfo] = self._load_accounts()
         self.trade_amount = float(os.getenv('DEFAULT_TRADE_AMOUNT', 5500))
         self.wait_time = int(os.getenv('WAIT_TIME_SECONDS', 2))
-        self.results: queue.Queue = queue.Queue()
+        self.results: queue.Queue[TradeResult] = queue.Queue()
         
-    def _get_env_keys(self) -> List[str]:
+    def _get_env_keys(self) -> list[str]:
         """환경변수 키 접두사를 반환합니다.
 
         Returns:
@@ -62,7 +59,9 @@ class AirdropBot:
         """
         return ['BITHUMB_API_KEY', 'BITHUMB_SECRET_KEY']
     
-    def _create_account_dict(self, account_id: str, api_key: str, api_secret: str) -> Dict[str, str]:
+    def _create_account_dict(
+        self, account_id: str, api_key: str, api_secret: str
+    ) -> AccountInfo:
         """계정 정보 딕셔너리를 생성합니다.
         
         Args:
@@ -79,7 +78,7 @@ class AirdropBot:
             'api_secret': api_secret.strip("'\"")
         }
     
-    def _load_all_accounts(self, key_prefixes: List[str]) -> List[Dict[str, str]]:
+    def _load_all_accounts(self, key_prefixes: list[str]) -> list[AccountInfo]:
         """모든 계정 정보를 로드합니다 (단일 및 다중 계정 모두 지원).
 
         Args:
@@ -88,18 +87,8 @@ class AirdropBot:
         Returns:
             계정 정보 리스트
         """
-        accounts = []
+        accounts: list[AccountInfo] = []
 
-        # 먼저 번호 없는 키 확인 (단일 계정)
-        api_key = os.getenv(key_prefixes[0])
-        api_secret = os.getenv(key_prefixes[1])
-
-        if api_key and api_secret:
-            accounts.append(
-                self._create_account_dict('main', api_key, api_secret)
-            )
-
-        # 번호가 있는 키들 확인 (다중 계정)
         account_num = 1
         while True:
             api_key = os.getenv(f'{key_prefixes[0]}_{account_num}')
@@ -113,24 +102,17 @@ class AirdropBot:
             )
             account_num += 1
 
-        return accounts
+        if accounts:
+            return accounts
+
+        api_key = os.getenv(key_prefixes[0])
+        api_secret = os.getenv(key_prefixes[1])
+        if api_key and api_secret:
+            return [self._create_account_dict('account_1', api_key, api_secret)]
+
+        return []
     
-    def _get_exchange(self, account: Dict[str, str]):
-        """계정 정보로 거래소 객체를 생성합니다.
-        
-        Args:
-            account: 계정 정보 딕셔너리
-            
-        Returns:
-            거래소 객체 (BithumbExchange)
-        """
-        api_credentials = {
-            'apiKey': account['api_key'],
-            'secret': account['api_secret']
-        }
-        return BithumbExchange(api_credentials)
-    
-    def _load_accounts(self) -> List[Dict[str, str]]:
+    def _load_accounts(self) -> list[AccountInfo]:
         """환경 변수에서 계정 정보를 로드합니다.
 
         환경 변수에서 API 키를 찾아 계정 정보를 생성합니다.
@@ -145,23 +127,21 @@ class AirdropBot:
         logger.info(f"로드된 계정 수: {len(accounts)}")
         return accounts
     
-    def _create_exchange(self, account_info: Dict[str, str]):
+    def create_exchange(self, account_info: AccountInfo) -> BaseExchange:
         """계정 정보를 바탕으로 거래소 객체를 생성합니다.
-        
+
         Args:
-            account_info: 계정 정보 딕셔너리
-            
+            account_info: 계정 정보.
+
         Returns:
-            거래소 객체
+            거래소 객체.
         """
-        credentials = {
-            'apiKey': account_info['api_key'],
-            'secret': account_info['api_secret']
-        }
-        
+        credentials = {'apiKey': account_info['api_key'], 'secret': account_info['api_secret']}
         return BithumbExchange(credentials)
     
-    def _execute_buy_order(self, exchange, symbol: str, account_id: str) -> Optional[dict]:
+    def _execute_buy_order(
+        self, exchange: BaseExchange, symbol: str, account_id: str
+    ) -> Optional[dict[str, Any]]:
         """매수 주문을 실행합니다.
         
         Args:
@@ -182,7 +162,7 @@ class AirdropBot:
             
         return buy_order
     
-    def _wait_for_balance(self, exchange, coin: str, account_id: str) -> float:
+    def _wait_for_balance(self, exchange: BaseExchange, coin: str, account_id: str) -> float:
         """매수 후 잔고를 확인합니다. 최대 3회 재시도합니다.
         
         Args:
@@ -193,9 +173,9 @@ class AirdropBot:
         Returns:
             사용 가능한 코인 수량
         """
-        available_amount = 0
+        available_amount = 0.0
         
-        for retry in range(3):
+        for retry in range(BALANCE_RETRY_COUNT):
             balance = exchange.get_balance()
             
             if balance and coin in balance:
@@ -203,15 +183,17 @@ class AirdropBot:
                 if available_amount > 0:
                     break
             
-            if retry < 2:
-                time.sleep(2)
+            if retry < BALANCE_RETRY_COUNT - 1:
+                time.sleep(BALANCE_RETRY_DELAY_SECONDS)
         
         if not available_amount:
             logger.error(f"[{account_id}] {coin} 잔고 없음")
         
         return available_amount
     
-    def _execute_sell_order(self, exchange, symbol: str, amount: float, account_id: str) -> Optional[dict]:
+    def _execute_sell_order(
+        self, exchange: BaseExchange, symbol: str, amount: float, account_id: str
+    ) -> Optional[dict[str, Any]]:
         """매도 주문을 실행합니다.
         
         Args:
@@ -233,9 +215,15 @@ class AirdropBot:
             
         return sell_order
     
-    def _report_result(self, account_id: str, symbol: str, success: bool, 
-                      buy_order: Optional[dict] = None, sell_order: Optional[dict] = None, 
-                      error: Optional[str] = None) -> None:
+    def _report_result(
+        self,
+        account_id: str,
+        symbol: str,
+        success: bool,
+        buy_order: Optional[dict[str, Any]] = None,
+        sell_order: Optional[dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> None:
         """거래 결과를 결과 큐에 추가합니다.
         
         Args:
@@ -246,22 +234,22 @@ class AirdropBot:
             sell_order: 매도 주문 결과
             error: 오류 메시지
         """
-        result = {
+        result: TradeResult = {
             'account': account_id,
             'symbol': symbol,
             'success': success
         }
         
-        if buy_order:
+        if buy_order is not None:
             result['buy_order'] = buy_order
-        if sell_order:
+        if sell_order is not None:
             result['sell_order'] = sell_order
         if error:
             result['error'] = error
             
         self.results.put(result)
     
-    def participate_event_single(self, account_info: Dict[str, str], symbol: str) -> bool:
+    def participate_event_single(self, account_info: AccountInfo, symbol: str) -> bool:
         """단일 계정으로 이벤트 참여합니다.
         
         지정된 계정으로 에어드랍 이벤트에 참여합니다.
@@ -282,7 +270,7 @@ class AirdropBot:
         try:
             logger.info(f"[{account_id}] 에어드랍 이벤트 시작")
             
-            exchange = self._create_exchange(account_info)
+            exchange = self.create_exchange(account_info)
             symbol = f"{symbol.upper()}/KRW"
             
             self._log_balance(exchange, account_id, "초기")
@@ -320,7 +308,7 @@ class AirdropBot:
             self._report_result(account_id, symbol, False, error=str(e))
             return False
     
-    def _log_balance(self, exchange, account_id: str, prefix: str = "") -> None:
+    def _log_balance(self, exchange: BaseExchange, account_id: str, prefix: str = "") -> None:
         """KRW 잔고를 로깅합니다.
         
         Args:
@@ -330,10 +318,12 @@ class AirdropBot:
         """
         balance = exchange.get_balance()
         if balance and 'KRW' in balance:
-            krw_balance = balance['KRW']['free']
+            krw_balance = balance['KRW'].get('free', 0.0)
             logger.info(f"[{account_id}] {prefix} KRW 잔고: {krw_balance:,.0f} KRW")
     
-    def _execute_parallel_tasks(self, accounts: List[Dict[str, str]], symbols: List[str], max_workers: int) -> None:
+    def _execute_parallel_tasks(
+        self, accounts: list[AccountInfo], symbols: list[str], max_workers: int
+    ) -> None:
         """여러 계정과 심볼에 대해 병렬로 작업을 실행합니다.
         
         Args:
@@ -342,7 +332,7 @@ class AirdropBot:
             max_workers: 동시 실행할 최대 스레드 수
         """
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {}
+            futures: dict[Future[bool], tuple[AccountInfo, str]] = {}
             for account in accounts:
                 for symbol in symbols:
                     future = executor.submit(self.participate_event_single, account, symbol)
@@ -355,7 +345,7 @@ class AirdropBot:
                 except Exception as e:
                     logger.error(f"[{account['account_id']}] {symbol} 작업 실행 중 오류: {e}")
     
-    def _collect_results(self) -> tuple[int, int, dict]:
+    def _collect_results(self) -> tuple[int, int, dict[str, dict[str, int]]]:
         """결과 큐에서 결과를 수집하고 집계합니다.
         
         Returns:
@@ -363,11 +353,11 @@ class AirdropBot:
         """
         success_count = 0
         fail_count = 0
-        coin_results = {}
+        coin_results: dict[str, dict[str, int]] = {}
         
         while not self.results.empty():
             result = self.results.get()
-            symbol = result.get('symbol', 'Unknown')
+            symbol = result['symbol'].split('/')[0]
             
             if symbol not in coin_results:
                 coin_results[symbol] = {'success': 0, 'fail': 0}
@@ -383,8 +373,14 @@ class AirdropBot:
         
         return success_count, fail_count, coin_results
     
-    def _log_summary(self, accounts: List[Dict[str, str]], symbols: List[str], 
-                    success_count: int, fail_count: int, coin_results: dict) -> None:
+    def _log_summary(
+        self,
+        accounts: list[AccountInfo],
+        symbols: list[str],
+        success_count: int,
+        fail_count: int,
+        coin_results: dict[str, dict[str, int]],
+    ) -> None:
         """실행 결과 요약을 로깅합니다.
         
         Args:
@@ -405,7 +401,12 @@ class AirdropBot:
                 if symbol in coin_results:
                     logger.info(f"  {symbol}: 성공 {coin_results[symbol]['success']}, 실패 {coin_results[symbol]['fail']}")
     
-    def participate_all_accounts(self, symbols: List[str], max_workers: int = 5, accounts: Optional[List[Dict[str, str]]] = None) -> None:
+    def participate_all_accounts(
+        self,
+        symbols: list[str],
+        max_workers: int = 5,
+        accounts: Optional[list[AccountInfo]] = None,
+    ) -> None:
         """모든 계정으로 동시에 이벤트 참여합니다.
         
         ThreadPoolExecutor를 사용하여 여러 계정으로 동시에
@@ -439,7 +440,7 @@ class AirdropBot:
         # 결과 요약 로깅
         self._log_summary(accounts, symbols, success_count, fail_count, coin_results)
     
-    def _fetch_price_data(self, account_id: str) -> Optional[dict]:
+    def _fetch_price_data(self, account_id: str) -> Optional[dict[str, Any]]:
         """빗썸 API에서 현재 시세 정보를 가져옵니다.
         
         Args:
@@ -449,19 +450,27 @@ class AirdropBot:
             가격 정보 딕셔너리 또는 None
         """
         try:
-            ticker_response = requests.get("https://api.bithumb.com/public/ticker/ALL_KRW")
-            ticker_data = ticker_response.json()
+            ticker_response = requests.get(
+                "https://api.bithumb.com/public/ticker/ALL_KRW",
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            ticker_data = cast(dict[str, Any], ticker_response.json())
             
             if ticker_data['status'] != '0000':
                 logger.error(f"[{account_id}] 시세 조회 실패")
                 return None
                 
-            return ticker_data['data']
+            return cast(dict[str, Any], ticker_data['data'])
         except Exception as e:
             logger.error(f"[{account_id}] 시세 조회 중 오류: {e}")
             return None
     
-    def _identify_small_holdings(self, balance: dict, prices: dict, account_id: str) -> List[Dict[str, any]]:
+    def _identify_small_holdings(
+        self,
+        balance: dict[str, dict[str, float]],
+        prices: dict[str, Any],
+        account_id: str,
+    ) -> list[SmallHolding]:
         """잔고에서 5천원 이하의 소액 코인을 식별합니다.
         
         Args:
@@ -472,32 +481,33 @@ class AirdropBot:
         Returns:
             소액 코인 정보 리스트
         """
-        small_holdings = []
+        small_holdings: list[SmallHolding] = []
         
         for coin, info in balance.items():
             if coin == 'KRW':
                 continue
                 
-            amount = info.get('free', 0)
+            amount = float(info.get('free', 0.0))
             if amount <= 0:
                 continue
                 
             coin_key = coin.upper()
-            
-            if coin_key not in prices or not isinstance(prices[coin_key], dict):
+
+            price_info = prices.get(coin_key)
+            if not isinstance(price_info, dict):
                 logger.warning(f"[{account_id}] {coin} 시세 정보 없음 (보유: {amount:.8f}개)")
                 continue
                 
-            if 'closing_price' not in prices[coin_key]:
+            if 'closing_price' not in price_info:
                 continue
                 
             try:
-                current_price = float(prices[coin_key]['closing_price'])
+                current_price = float(price_info['closing_price'])
                 total_value = amount * current_price
                 
                 logger.info(f"[{account_id}] {coin}: 수량={amount:.8f}, 현재가={current_price:,.0f}원, 평가금액={total_value:,.0f}원")
                 
-                if 0 < total_value < 5000:
+                if 0 < total_value < SMALL_HOLDING_MAX_VALUE_KRW:
                     small_holdings.append({
                         'coin': coin,
                         'amount': amount,
@@ -509,7 +519,9 @@ class AirdropBot:
                 
         return small_holdings
     
-    def _process_single_coin_cleanup(self, exchange, coin: str, account_id: str) -> bool:
+    def _process_single_coin_cleanup(
+        self, exchange: BaseExchange, coin: str, account_id: str
+    ) -> bool:
         """단일 코인에 대해 추가 매수 후 전량 매도를 수행합니다.
         
         Args:
@@ -523,13 +535,13 @@ class AirdropBot:
         symbol = f"{coin}/KRW"
         
         # 5,500원 추가 매수
-        buy_order = exchange.market_buy_krw(symbol, 5500)
+        buy_order = exchange.market_buy_krw(symbol, CLEANUP_BUY_AMOUNT_KRW)
         if not buy_order:
             logger.error(f"[{account_id}] {coin} 추가 매수 실패")
             return False
         
         logger.info(f"[{account_id}] {coin} 5,500원 추가 매수 완료")
-        time.sleep(2)  # 잔고 반영 대기
+        time.sleep(BALANCE_RETRY_DELAY_SECONDS)  # 잔고 반영 대기
         
         # 잔고 재확인
         updated_balance = exchange.get_balance()
@@ -538,7 +550,7 @@ class AirdropBot:
             return False
         
         # 전량 매도
-        sell_amount = updated_balance[coin].get('free', 0)
+        sell_amount = float(updated_balance[coin].get('free', 0.0))
         if sell_amount <= 0:
             logger.error(f"[{account_id}] {coin} 매도 가능 수량 없음")
             return False
@@ -551,7 +563,7 @@ class AirdropBot:
         logger.info(f"[{account_id}] {coin} 전량 매도 완료")
         return True
     
-    def cleanup_small_holdings(self, account_info: Dict[str, str]) -> Dict[str, any]:
+    def cleanup_small_holdings(self, account_info: AccountInfo) -> CleanupResults:
         """5천원 이하의 소액 코인들을 정리합니다.
         
         빗썸에서는 5천원 이하로는 매도가 불가능하므로,
@@ -564,7 +576,7 @@ class AirdropBot:
             정리된 코인 정보와 결과를 담은 딕셔너리
         """
         account_id = account_info['account_id']
-        results = {
+        results: CleanupResults = {
             'cleaned_coins': [],
             'failed_coins': [],
             'total_cleaned': 0
@@ -642,7 +654,9 @@ class AirdropBot:
             
         return results
     
-    def cleanup_all_accounts(self, max_workers: int = 5, accounts: Optional[List[Dict[str, str]]] = None) -> None:
+    def cleanup_all_accounts(
+        self, max_workers: int = 5, accounts: Optional[list[AccountInfo]] = None
+    ) -> None:
         """모든 계정의 소액 코인을 정리합니다.
         
         Args:
@@ -661,7 +675,7 @@ class AirdropBot:
         logger.info(f"정리할 계정 수: {len(accounts)}개")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
+            futures: dict[Future[CleanupResults], AccountInfo] = {
                 executor.submit(self.cleanup_small_holdings, account): account
                 for account in accounts
             }
@@ -676,4 +690,3 @@ class AirdropBot:
                     logger.error(f"[{account['account_id']}] 정리 작업 실행 중 오류: {e}")
         
         logger.info(f"\n=== 소액 정리 완료: 총 {total_cleaned}개 코인 정리됨 ===")
-

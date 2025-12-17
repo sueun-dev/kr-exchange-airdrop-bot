@@ -37,7 +37,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ### 3. 의존성 설치
 ```bash
-uv pip sync
+uv sync
 ```
 
 ## 설정
@@ -88,6 +88,10 @@ WAIT_TIME_SECONDS=2
 
 ### 기본 실행
 ```bash
+## 권장 (모듈 실행)
+uv run python -m exchange_event
+
+## (호환) 기존 경로
 uv run python src/main.py
 ```
 
@@ -240,6 +244,23 @@ tail -f airdrop_bot.log
 
 실행 로그는 `logs/airdrop_event.log` 파일에 저장됩니다.
 배경 실행 시 추가로 `airdrop_bot.log` 파일이 생성됩니다.
+
+## 개발
+
+개발/테스트 의존성 설치:
+```bash
+uv sync --extra dev
+```
+
+테스트:
+```bash
+uv run pytest
+```
+
+타입 체크:
+```bash
+uv run mypy src tests
+```
 
 ## 문제 해결
 

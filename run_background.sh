@@ -5,7 +5,7 @@ echo "에어드랍 봇을 백그라운드에서 실행합니다..."
 echo "로그는 airdrop_bot.log 파일에 저장됩니다."
 
 # caffeinate로 시스템 절전 방지 + nohup으로 백그라운드 실행
-nohup caffeinate -i python3 src/main.py > airdrop_bot.log 2>&1 &
+nohup caffeinate -i uv run python -m exchange_event > airdrop_bot.log 2>&1 &
 
 # 프로세스 ID 저장
 echo $! > airdrop_bot.pid
