@@ -2,11 +2,35 @@
 name = "exchange-event"
 version = "0.1.0"
 description = "Automated airdrop event participation system for Korean exchanges"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
-    "ccxt>=4.1.0",
     "python-dotenv>=1.0.0",
-    "schedule>=1.2.0",
     "requests>=2.31.0",
-    "pytz>=2023.3",
+    "typing-extensions>=4.0.0",
 ]
+
+[project.scripts]
+exchange-event = "exchange_event.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.19.0",
+    "pytest>=8.0.0,<9",
+    "types-requests",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.9"
+mypy_path = ["src"]
+strict = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["dotenv"]
+ignore_missing_imports = true
+
+[tool.uv]
+package = true
