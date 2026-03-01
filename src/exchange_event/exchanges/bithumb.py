@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import time
+from threading import Lock
 from typing import Any, Mapping, Optional, cast
 from urllib.parse import urlencode
 
@@ -17,6 +18,8 @@ API_URL = "https://api.bithumb.com"
 MAX_REQUEST_ATTEMPTS = 3
 MIN_ORDER_KRW = 5500
 REQUEST_TIMEOUT_SECONDS = 10
+_NONCE_LOCK = Lock()
+_LAST_NONCE_BY_API_KEY: dict[str, int] = {}
 
 
 class BithumbExchange(BaseExchange):
@@ -41,7 +44,7 @@ class BithumbExchange(BaseExchange):
         
     def _generate_signature(self, endpoint: str, params: Mapping[str, str]) -> tuple[str, str]:
         """Generates an API signature for an authenticated request."""
-        nonce = str(int(time.time() * 1000))
+        nonce = self._next_nonce()
         data = endpoint + chr(0) + urlencode(params) + chr(0) + nonce
         h = hmac.new(
             self.api_secret.encode('utf-8'), data.encode('utf-8'), hashlib.sha512
@@ -49,6 +52,55 @@ class BithumbExchange(BaseExchange):
         signature = base64.b64encode(h.hexdigest().encode('utf-8')).decode('utf-8')
         
         return signature, nonce
+
+    def _next_nonce(self) -> str:
+        """Returns a strictly increasing nonce per API key.
+
+        Bithumb validates nonces as monotonic for a given key. Millisecond-only
+        timestamps collide under concurrency, so we guard with a process-wide lock.
+        """
+        current_ms = int(time.time() * 1000)
+        with _NONCE_LOCK:
+            last_nonce = _LAST_NONCE_BY_API_KEY.get(self.api_key, 0)
+            next_nonce = current_ms if current_ms > last_nonce else last_nonce + 1
+            _LAST_NONCE_BY_API_KEY[self.api_key] = next_nonce
+        return str(next_nonce)
+
+    def _fetch_ticker_data(self, coin: str) -> Optional[dict[str, Any]]:
+        """Fetches raw ticker data for a coin from Bithumb public API."""
+        response = requests.get(
+            f"{self.api_url}/public/ticker/{coin}_KRW",
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        ticker_data = cast(dict[str, Any], response.json())
+
+        if ticker_data.get('status') != '0000':
+            self.logger.error("가격 조회 실패: %s", ticker_data)
+            return None
+
+        ticker_info = ticker_data.get('data')
+        if not isinstance(ticker_info, dict):
+            self.logger.error("가격 응답 형식 오류: %s", ticker_data)
+            return None
+
+        return cast(dict[str, Any], ticker_info)
+
+    def get_last_price(self, symbol: str) -> Optional[float]:
+        """Returns last traded price for a symbol without fetching orderbook."""
+        try:
+            coin = symbol.split('/')[0]
+            ticker_info = self._fetch_ticker_data(coin)
+            if ticker_info is None:
+                return None
+
+            last_price = float(ticker_info.get('closing_price', 0.0))
+            if last_price <= 0:
+                self.logger.error("유효하지 않은 현재가: %s", ticker_info.get('closing_price'))
+                return None
+            return last_price
+        except Exception as e:
+            self.logger.error("현재가 조회 실패: %s", e)
+            return None
     
     def _request(
         self, endpoint: str, params: Optional[Mapping[str, str]] = None
@@ -116,19 +168,11 @@ class BithumbExchange(BaseExchange):
         """Returns current ticker data for `symbol`."""
         try:
             coin = symbol.split('/')[0]
-            
-            ticker_response = requests.get(
-                f"{self.api_url}/public/ticker/{coin}_KRW",
-                timeout=REQUEST_TIMEOUT_SECONDS,
-            )
-            ticker_data = cast(dict[str, Any], ticker_response.json())
-            
-            if ticker_data['status'] != '0000':
-                self.logger.error(f"가격 조회 실패: {ticker_data}")
+
+            ticker_info = self._fetch_ticker_data(coin)
+            if ticker_info is None:
                 return None
-            
-            ticker_info = cast(dict[str, Any], ticker_data['data'])
-            
+
             orderbook_response = requests.get(
                 f"{self.api_url}/public/orderbook/{coin}_KRW",
                 timeout=REQUEST_TIMEOUT_SECONDS,
@@ -216,14 +260,17 @@ class BithumbExchange(BaseExchange):
                 )
                 return None
             
-            # 현재가 조회하여 수량 계산
-            ticker = self.get_ticker(symbol)
-            if not ticker:
+            # 현재가만 조회해 수량 계산 (orderbook 호출 불필요)
+            last_price = self.get_last_price(symbol)
+            if last_price is None:
                 self.logger.error("가격 정보 조회 실패")
                 return None
             
             # 수량 계산 (소수점 8자리까지 - 빗썸 기준)
-            units = round(krw_amount / ticker['last'], 8)
+            units = round(krw_amount / last_price, 8)
+            if units <= 0:
+                self.logger.error("계산된 주문 수량이 유효하지 않음: %s", units)
+                return None
             
             params = {
                 'order_currency': coin,

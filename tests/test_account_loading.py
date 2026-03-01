@@ -48,3 +48,33 @@ def test_load_accounts_returns_empty_when_missing(monkeypatch: pytest.MonkeyPatc
     bot = AirdropBot("bithumb")
 
     assert bot.accounts == []
+
+
+def test_load_accounts_supports_non_contiguous_numbered_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_bithumb_env()
+
+    monkeypatch.setenv("BITHUMB_API_KEY_1", "key_1")
+    monkeypatch.setenv("BITHUMB_SECRET_KEY_1", "secret_1")
+    monkeypatch.setenv("BITHUMB_API_KEY_3", "key_3")
+    monkeypatch.setenv("BITHUMB_SECRET_KEY_3", "secret_3")
+
+    bot = AirdropBot("bithumb")
+
+    assert [account["account_id"] for account in bot.accounts] == ["account_1", "account_3"]
+    assert bot.accounts[1]["api_key"] == "key_3"
+
+
+def test_load_accounts_returns_empty_for_incomplete_numbered_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_bithumb_env()
+
+    monkeypatch.setenv("BITHUMB_API_KEY_1", "key_1")
+    monkeypatch.setenv("BITHUMB_API_KEY", "legacy_key")
+    monkeypatch.setenv("BITHUMB_SECRET_KEY", "legacy_secret")
+
+    bot = AirdropBot("bithumb")
+
+    assert bot.accounts == []
