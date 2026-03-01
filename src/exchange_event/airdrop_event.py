@@ -77,6 +77,20 @@ class AirdropBot:
             'api_key': api_key.strip("'\""),
             'api_secret': api_secret.strip("'\"")
         }
+
+    def _load_numbered_env_values(self, prefix: str) -> dict[int, str]:
+        """환경 변수에서 `<PREFIX>_<숫자>` 형태의 값을 추출합니다."""
+        numbered_values: dict[int, str] = {}
+        numbered_prefix = f"{prefix}_"
+
+        for key, value in os.environ.items():
+            if not key.startswith(numbered_prefix) or not value:
+                continue
+            suffix = key[len(numbered_prefix):]
+            if suffix.isdigit():
+                numbered_values[int(suffix)] = value
+
+        return numbered_values
     
     def _load_all_accounts(self, key_prefixes: list[str]) -> list[AccountInfo]:
         """모든 계정 정보를 로드합니다 (단일 및 다중 계정 모두 지원).
@@ -87,23 +101,23 @@ class AirdropBot:
         Returns:
             계정 정보 리스트
         """
-        accounts: list[AccountInfo] = []
+        api_keys = self._load_numbered_env_values(key_prefixes[0])
+        api_secrets = self._load_numbered_env_values(key_prefixes[1])
+        numbered_indices = sorted(set(api_keys) & set(api_secrets))
 
-        account_num = 1
-        while True:
-            api_key = os.getenv(f'{key_prefixes[0]}_{account_num}')
-            api_secret = os.getenv(f'{key_prefixes[1]}_{account_num}')
+        if numbered_indices:
+            return [
+                self._create_account_dict(
+                    f'account_{index}', api_keys[index], api_secrets[index]
+                )
+                for index in numbered_indices
+            ]
 
-            if not api_key or not api_secret:
-                break
-
-            accounts.append(
-                self._create_account_dict(f'account_{account_num}', api_key, api_secret)
+        if api_keys or api_secrets:
+            logger.warning(
+                "번호 기반 API 키/시크릿 쌍이 완전하지 않아 계정을 로드하지 못했습니다."
             )
-            account_num += 1
-
-        if accounts:
-            return accounts
+            return []
 
         api_key = os.getenv(key_prefixes[0])
         api_secret = os.getenv(key_prefixes[1])
