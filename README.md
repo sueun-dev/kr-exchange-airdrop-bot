@@ -1,282 +1,163 @@
-# 에어드랍 이벤트 자동 참여 시스템
+# 빗썸 에어드랍 자동 참여 봇
 
-빗썸에서 진행하는 에어드랍 이벤트에 자동으로 참여하는 시스템입니다.
+빗썸 에어드랍 참여를 반복 실행할 수 있도록 정리한 Bithumb 전용 자동화 도구입니다. 단일 계정과 다중 계정을 모두 지원하며, 계정별 잔액 확인, 소액 코인 정리, 다일 스케줄 실행을 한 CLI 안에서 처리합니다.
+
+## 구조
+
+```text
+src/
+  bithumb_airdrop_bot/
+    bot.py                 # 계정 로딩, 거래 오케스트레이션
+    cli.py                 # 대화형 CLI 진입점
+    logging_config.py      # 콘솔/파일 로깅 설정
+    models.py              # TypedDict 모델
+    clients/
+      base.py              # 공통 클라이언트 인터페이스
+      bithumb_client.py    # Bithumb REST API 연동
+
+tests/
+  test_bithumb_account_loading.py
+  test_bithumb_bot_single_participation.py
+  test_bithumb_bot_small_holdings.py
+  test_bithumb_exchange_client.py
+```
 
 ## 주요 기능
 
-### 🎯 핵심 기능
-- **자동 거래**: 지정한 코인을 시장가 매수 → 대기 → 전량 매도
-- **거래소**: 빗썸 전용
-- **다중 계정**: 여러 계정으로 동시 참여 가능
-- **다중 코인**: 여러 코인을 한 번에 거래 가능
-- **반복 실행**: 일정 기간 동안 매일 자정(12:01 AM KST)에 자동 실행
+- 빗썸 시장가 매수 후 지정 시간 대기, 전량 매도
+- 여러 계정을 동시에 선택해 병렬 실행
+- 여러 코인을 한 번에 처리
+- 모든 계정의 잔액 및 보유 자산 조회
+- 5,000 KRW 이하 소액 코인 자동 정리
+- 여러 날에 걸친 반복 실행과 KST 기준 예약 실행
+- 파일 로그와 콘솔 로그 동시 기록
 
-### 📊 상세 기능
-- **병렬 처리**: ThreadPoolExecutor를 사용한 빠른 동시 처리
-- **재시도 로직**: 네트워크 오류 시 자동 재시도 (최대 3회, exponential backoff)
-- **상세 로깅**: 모든 거래 내역을 파일과 콘솔에 기록
-- **안전 장치**: 최소 거래 금액 확인, 잔고 확인 등
-- **지갑 잔액 조회**: 모든 계정의 잔액 및 보유 코인 확인 기능
-- **계정 선택**: 특정 계정만 선택하여 거래 가능 (범위 선택 지원)
-- **소액 코인 정리**: 5천원 이하 잔액 자동 정리
-- **스케줄 실행**: 2일차부터 매일 12:01 AM KST 실행
-- **백그라운드 실행**: macOS에서 시스템 절전 방지 및 백그라운드 실행
+## 요구 사항
+
+- Python `>= 3.9`
+- [uv](https://docs.astral.sh/uv/)
+- 빗썸 API 키와 시크릿
 
 ## 설치
 
-### 1. 프로젝트 클론
 ```bash
 git clone https://github.com/sueun-dev/kr-exchange-airdrop-bot.git
 cd kr-exchange-airdrop-bot
-```
-
-### 2. uv 설치 (아직 없다면)
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-### 3. 의존성 설치
-```bash
 uv sync
 ```
 
-## 설정
+개발 의존성까지 설치하려면:
 
-### API 키 설정
-
-`.env` 파일을 생성하고 거래소 API 키를 설정하세요:
-
-```env
-# 빗썸 API 키 (단일 계정)
-BITHUMB_API_KEY=your_bithumb_api_key_here
-BITHUMB_SECRET_KEY=your_bithumb_secret_key_here
-
-# 거래 설정
-DEFAULT_TRADE_AMOUNT=5500  # 기본 거래 금액 (KRW)
-WAIT_TIME_SECONDS=2  # 매수 후 대기 시간 (초)
-```
-
-### 다중 계정 설정
-
-빗썸 다중 계정
-```env
-# 빗썸 계정 1
-BITHUMB_API_KEY_1=api_key_1
-BITHUMB_SECRET_KEY_1=secret_key_1
-
-# 빗썸 계정 2
-BITHUMB_API_KEY_2=api_key_2
-BITHUMB_SECRET_KEY_2=secret_key_2
-
-# 더 많은 계정 추가 가능...
-```
-
-### 다중 계정 설정 예시
-```env
-# 빗썸 계정들
-BITHUMB_API_KEY_1=bithumb_key_1
-BITHUMB_SECRET_KEY_1=bithumb_secret_1
-BITHUMB_API_KEY_2=bithumb_key_2
-BITHUMB_SECRET_KEY_2=bithumb_secret_2
-
-# 거래 설정
-DEFAULT_TRADE_AMOUNT=5500
-WAIT_TIME_SECONDS=2
-```
-
-## 실행 방법
-
-### 기본 실행
-```bash
-## 권장 (모듈 실행)
-uv run python -m exchange_event
-
-## (호환) 기존 경로
-uv run python src/main.py
-```
-
-### 백그라운드 실행 (macOS)
-```bash
-# 백그라운드에서 실행 (시스템 절전 방지)
-./run_background.sh
-
-# 백그라운드 프로세스 중단
-./stop_background.sh
-
-# 실시간 로그 확인
-tail -f airdrop_bot.log
-```
-
-### 실행 과정
-
-1. **계정 선택** (다중 계정인 경우)
-   ```
-   계정을 선택하세요:
-   - all: 모든 계정 사용
-   - 숫자: 특정 계정 선택 (예: 1 또는 1,3)
-   - 범위: 계정 범위 선택 (예: 1-3)
-   ```
-
-2. **지갑 잔액 확인 옵션**
-   ```
-   지갑 잔액만 확인하시겠습니까? (y/n): n
-   ```
-
-3. **코인 선택**
-   - 단일 코인: `BTC`
-   - 여러 코인: `BTC,ETH,XRP`
-
-4. **이벤트 기간 설정**
-   - 1회만 실행: `1`
-   - 3일간 실행: `3` (매일 자정에 자동 실행)
-
-5. **다중 계정 시 동시 실행 수 설정** (선택사항)
-   ```
-   동시 실행할 최대 계정 수 (기본: 5): 3
-   ```
-
-6. **소액 코인 정리**
-   ```
-   대기 중 5천원 이하 코인 정리를 하시겠습니까? (y/n): y
-   ```
-
-7. **설정 확인 및 실행**
-   ```
-   === 설정 확인 ===
-   거래소: bithumb
-   계정 수: 2
-   심볼: BTC, ETH (총 2개)
-   거래 금액: 5,500 KRW (코인당)
-   대기 시간: 2초
-   이벤트 기간: 3일
-   실행 주기: 매일 자정 (12:01 AM KST)
-   동시 실행: 2개 계정
-   
-   위 설정으로 진행하시겠습니까? (y/n): y
-   ```
-
-## 사용 예시
-
-### 예시 1: 빗썸에서 XRP 1회 거래
-```
-코인: XRP
-이벤트 기간: 1
-→ XRP를 5,500원어치 매수 후 2초 대기하고 전량 매도
-```
-
-### 예시 2: 빗썸에서 여러 코인 3일간 거래
-```
-코인: BTC,ETH,XRP
-이벤트 기간: 3
-→ 첫날: 즉시 실행 (원래 대기시간 사용)
-→ 2-3일차: 매일 12:01 AM KST에 자동 실행 (2초 대기)
-```
-
-### 예시 3: 다중 계정으로 여러 코인 거래
-```
-계정 수: 3개 감지됨
-계정 선택: 1,3 (1번과 3번 계정만 사용)
-코인: ETH,DOGE
-이벤트 기간: 1
-소액 정리: y
-→ 2개 계정에서 동시에 ETH와 DOGE 거래 후 소액 정리
-```
-
-### 예시 4: 지갑 잔액 조회만
-```
-지갑 잔액만 확인: y
-→ 모든 계정의 원화 잔액과 보유 코인 정보 출력
-```
-
-## 실행 결과 예시
-
-```
-=== 실행 결과 ===
-✅ account_1 - BTC: 성공
-✅ account_1 - ETH: 성공
-❌ account_2 - BTC: 실패 (잔고 부족)
-✅ account_2 - ETH: 성공
-
-=== 전체 결과 요약 ===
-총 작업 수: 4 (계정 2개 × 코인 2개)
-성공: 3, 실패: 1
-
-코인별 결과:
-  BTC: 성공 1, 실패 1
-  ETH: 성공 2, 실패 0
-```
-
-## 주의사항
-
-### API 키 관련
-- API 키에 **거래 권한**이 있어야 합니다
-- API 키는 절대 외부에 노출하지 마세요
-- `.env` 파일은 `.gitignore`에 포함되어 있습니다
-
-### 거래 관련
-- **최소 거래 금액**: 5,500원
-- **거래 수수료**가 발생합니다 (거래소별 상이)
-- 시장가 주문이므로 **슬리피지**가 발생할 수 있습니다
-
-### 실행 관련
-- 네트워크 상태에 따라 거래가 지연될 수 있습니다
-- 장기간 실행 시 컴퓨터가 계속 켜져 있어야 합니다
-- 거래소 점검 시간에는 거래가 불가능합니다
-
-## 추가 기능
-
-### 소액 코인 정리
-- 5천원 이하로 남은 코인 자동 감지
-- 5,500원 추가 매수 후 전량 매도
-- 모든 계정 동시 처리 지원
-
-### 계정별 잔액 조회
-- 원화 잔액 확인
-- 보유 코인 목록 및 평가금액
-- 거래 없이 잔액만 확인 가능
-
-### 스케줄링 기능
-- 첫날: 즉시 실행 (원래 설정된 대기시간 사용)
-- 2일차부터: 매일 자정 12:01 AM KST에 자동 실행 (2초 대기)
-- 지정 일수만큼 반복
-
-## 로그 파일
-
-실행 로그는 `logs/airdrop_event.log` 파일에 저장됩니다.
-배경 실행 시 추가로 `airdrop_bot.log` 파일이 생성됩니다.
-
-## 개발
-
-개발/테스트 의존성 설치:
 ```bash
 uv sync --extra dev
 ```
 
-테스트:
+## 환경 변수 설정
+
+`.env.sample`을 복사해 `.env`를 만든 뒤 값을 채우면 됩니다.
+
+```bash
+cp .env.sample .env
+```
+
+단일 계정 예시:
+
+```env
+BITHUMB_API_KEY=your_bithumb_api_key
+BITHUMB_SECRET_KEY=your_bithumb_secret_key
+DEFAULT_TRADE_AMOUNT=5500
+WAIT_TIME_SECONDS=2
+```
+
+다중 계정 예시:
+
+```env
+BITHUMB_API_KEY_1=your_bithumb_api_key_1
+BITHUMB_SECRET_KEY_1=your_bithumb_secret_key_1
+BITHUMB_API_KEY_2=your_bithumb_api_key_2
+BITHUMB_SECRET_KEY_2=your_bithumb_secret_key_2
+DEFAULT_TRADE_AMOUNT=5500
+WAIT_TIME_SECONDS=2
+```
+
+번호가 붙은 키가 있으면 다중 계정 설정을 우선 사용하고, 없을 때만 레거시 단일 계정 키를 읽습니다.
+
+## 실행
+
+권장 실행 방식:
+
+```bash
+uv run bithumb-airdrop-bot
+```
+
+동일한 동작을 모듈 실행으로 호출하려면:
+
+```bash
+uv run python -m bithumb_airdrop_bot
+```
+
+레거시 엔트리포인트도 유지되어 있습니다:
+
+```bash
+uv run python src/main.py
+```
+
+## 백그라운드 실행
+
+macOS에서 `caffeinate`를 사용해 절전을 막고 백그라운드 실행하려면:
+
+```bash
+./run_bithumb_airdrop_background.sh
+```
+
+중단:
+
+```bash
+./stop_bithumb_airdrop_background.sh
+```
+
+로그 확인:
+
+```bash
+tail -f bithumb_airdrop_bot.log
+```
+
+## CLI 흐름
+
+실행하면 아래 순서로 설정을 받습니다.
+
+1. 사용할 계정 선택 (`all`, `1,3`, `1-3` 등)
+2. 잔액 조회만 할지 여부 선택
+3. 거래할 심볼 입력 (`BTC` 또는 `BTC,ETH,XRP`)
+4. 이벤트 진행 일수 입력
+5. 다중 계정일 경우 동시 실행 수 입력
+6. 소액 코인 정리 여부 선택
+7. 최종 설정 확인 후 실행
+
+`event_days > 1`이면 첫 실행은 즉시 수행하고, 2일차부터는 매일 `00:01 KST`에 실행합니다.
+
+## 로그 파일
+
+- 애플리케이션 로그: `logs/bithumb_airdrop.log`
+- 백그라운드 스크립트 로그: `bithumb_airdrop_bot.log`
+- 백그라운드 PID 파일: `bithumb_airdrop_bot.pid`
+
+## 테스트
+
 ```bash
 uv run pytest
 ```
 
 타입 체크:
+
 ```bash
 uv run mypy src tests
 ```
 
-## 문제 해결
+## 주의 사항
 
-### API 키 오류
-- API 키가 올바른지 확인하세요
-- API 키에 거래 권한이 있는지 확인하세요
-- API 키 앞뒤의 따옴표를 확인하세요
-
-### 잔고 부족
-- 계정에 충분한 KRW 잔고가 있는지 확인하세요
-- 최소 거래 금액 이상인지 확인하세요
-
-### 심볼 오류
-- 거래소에서 지원하는 코인인지 확인하세요
-- 코인 심볼을 대문자로 입력했는지 확인하세요
-
-## 라이선스
-
-이 프로젝트는 개인 사용 목적으로 제작되었습니다.
+- API 키에 거래 권한이 있어야 합니다.
+- 시장가 주문 특성상 슬리피지가 발생할 수 있습니다.
+- 수수료와 최소 주문 금액을 고려해야 합니다.
+- 장시간 실행 시 네트워크 상태와 거래소 점검 시간을 확인해야 합니다.
+- `.env` 파일은 절대 저장소에 커밋하지 마세요.

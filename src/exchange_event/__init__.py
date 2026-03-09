@@ -1,2 +1,0 @@
-"""Exchange event automation package."""
-

@@ -12,13 +12,13 @@ from typing import Any
 import pytest
 import requests
 
-from exchange_event.exchanges.bithumb import BithumbExchange
+from bithumb_airdrop_bot.clients.bithumb_client import BithumbExchangeClient
 
 from tests.conftest import DummyResponse
 
 
 def test_generate_signature_is_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
-    exchange = BithumbExchange({"apiKey": "k_sig", "secret": "s"})
+    exchange = BithumbExchangeClient({"apiKey": "k_sig", "secret": "s"})
 
     monkeypatch.setattr(time, "time", lambda: 1234.567)
 
@@ -37,7 +37,7 @@ def test_generate_signature_is_deterministic(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_get_krw_markets_parses_all_krw(monkeypatch: pytest.MonkeyPatch) -> None:
-    exchange = BithumbExchange({"apiKey": "k_markets", "secret": "s"})
+    exchange = BithumbExchangeClient({"apiKey": "k_markets", "secret": "s"})
 
     def fake_get(url: str, *args: object, **kwargs: object) -> DummyResponse:
         assert url.endswith("/public/ticker/ALL_KRW")
@@ -49,7 +49,7 @@ def test_get_krw_markets_parses_all_krw(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_get_ticker_combines_ticker_and_orderbook(monkeypatch: pytest.MonkeyPatch) -> None:
-    exchange = BithumbExchange({"apiKey": "k_ticker", "secret": "s"})
+    exchange = BithumbExchangeClient({"apiKey": "k_ticker", "secret": "s"})
 
     def fake_get(url: str, *args: object, **kwargs: object) -> DummyResponse:
         if "/public/ticker/" in url:
@@ -76,7 +76,7 @@ def test_get_ticker_combines_ticker_and_orderbook(monkeypatch: pytest.MonkeyPatc
 
 
 def test_get_balance_parses_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    exchange = BithumbExchange({"apiKey": "k_balance", "secret": "s"})
+    exchange = BithumbExchangeClient({"apiKey": "k_balance", "secret": "s"})
 
     def fake_request(endpoint: str, params: Any = None) -> dict[str, Any]:
         assert endpoint == "/info/balance"
@@ -108,12 +108,12 @@ def test_get_balance_parses_response(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_market_buy_krw_rejects_below_minimum() -> None:
-    exchange = BithumbExchange({"apiKey": "k_min_order", "secret": "s"})
+    exchange = BithumbExchangeClient({"apiKey": "k_min_order", "secret": "s"})
     assert exchange.market_buy_krw("BTC/KRW", 1000) is None
 
 
 def test_market_buy_krw_places_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    exchange = BithumbExchange({"apiKey": "k_buy_order", "secret": "s"})
+    exchange = BithumbExchangeClient({"apiKey": "k_buy_order", "secret": "s"})
 
     def fake_get_last_price(_symbol: str) -> float:
         return 1000.0
@@ -134,7 +134,7 @@ def test_market_buy_krw_places_order(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_generate_signature_nonce_is_monotonic_when_time_stalls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    exchange = BithumbExchange({"apiKey": "k_nonce_monotonic", "secret": "s"})
+    exchange = BithumbExchangeClient({"apiKey": "k_nonce_monotonic", "secret": "s"})
     monkeypatch.setattr(time, "time", lambda: 1234.567)
 
     _, nonce_1 = exchange._generate_signature("/info/balance", {"currency": "ALL"})
@@ -149,7 +149,7 @@ def test_generate_signature_nonce_unique_across_instances_in_parallel(
     monkeypatch.setattr(time, "time", lambda: 2000.0)
 
     def build_nonce(_idx: int) -> str:
-        exchange = BithumbExchange({"apiKey": "k_nonce_parallel", "secret": "s"})
+        exchange = BithumbExchangeClient({"apiKey": "k_nonce_parallel", "secret": "s"})
         return exchange._generate_signature("/info/balance", {"currency": "ALL"})[1]
 
     with ThreadPoolExecutor(max_workers=20) as executor:
@@ -161,7 +161,7 @@ def test_generate_signature_nonce_unique_across_instances_in_parallel(
 def test_market_buy_krw_uses_ticker_only_without_orderbook(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    exchange = BithumbExchange({"apiKey": "k_fast_buy", "secret": "s"})
+    exchange = BithumbExchangeClient({"apiKey": "k_fast_buy", "secret": "s"})
     requested_urls: list[str] = []
 
     def fake_get(url: str, *args: object, **kwargs: object) -> DummyResponse:
