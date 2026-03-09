@@ -1,4 +1,4 @@
-"""Airdrop event participation bot."""
+"""Core orchestration for the Bithumb airdrop bot."""
 
 from __future__ import annotations
 
@@ -11,9 +11,14 @@ from typing import Any, Optional, cast
 
 import requests
 
-from exchange_event.exchanges.base import BaseExchange
-from exchange_event.exchanges.bithumb import BithumbExchange
-from exchange_event.types import AccountInfo, CleanupResults, SmallHolding, TradeResult
+from bithumb_airdrop_bot.clients.base import BaseExchangeClient
+from bithumb_airdrop_bot.clients.bithumb_client import BithumbExchangeClient
+from bithumb_airdrop_bot.models import (
+    AccountInfo,
+    CleanupResults,
+    SmallHolding,
+    TradeResult,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -25,39 +30,25 @@ SMALL_HOLDING_MAX_VALUE_KRW = 5000
 REQUEST_TIMEOUT_SECONDS = 10
 
 
-class AirdropBot:
-    """에어드랍 이벤트 자동 참여 봇.
+class BithumbAirdropBot:
+    """빗썸 에어드랍 이벤트 자동 참여 봇.
     
     빗썸 거래소에서 에어드랍 이벤트에 자동으로 참여합니다.
     단일 계정과 다중 계정 모두 지원합니다.
     
     Attributes:
-        exchange_name: 거래소 이름 (현재는 'bithumb'만 지원)
         accounts: 로드된 계정 정보 리스트
         trade_amount: 거래 금액 (KRW)
         wait_time: 매수 후 대기 시간 (초)
         results: 거래 결과를 저장하는 큐
     """
-    
-    def __init__(self, exchange_name: str = 'bithumb') -> None:
-        """AirdropBot을 초기화합니다.
-        
-        Args:
-            exchange_name: 거래소 이름 ('bithumb'만 지원)
-        """
-        self.exchange_name = exchange_name
+
+    def __init__(self) -> None:
+        """빗썸 전용 봇을 초기화합니다."""
         self.accounts: list[AccountInfo] = self._load_accounts()
         self.trade_amount = float(os.getenv('DEFAULT_TRADE_AMOUNT', 5500))
         self.wait_time = int(os.getenv('WAIT_TIME_SECONDS', 2))
         self.results: queue.Queue[TradeResult] = queue.Queue()
-        
-    def _get_env_keys(self) -> list[str]:
-        """환경변수 키 접두사를 반환합니다.
-
-        Returns:
-            환경변수 키 접두사 리스트
-        """
-        return ['BITHUMB_API_KEY', 'BITHUMB_SECRET_KEY']
     
     def _create_account_dict(
         self, account_id: str, api_key: str, api_secret: str
@@ -92,7 +83,7 @@ class AirdropBot:
 
         return numbered_values
     
-    def _load_all_accounts(self, key_prefixes: list[str]) -> list[AccountInfo]:
+    def _load_all_accounts(self, key_prefixes: tuple[str, str]) -> list[AccountInfo]:
         """모든 계정 정보를 로드합니다 (단일 및 다중 계정 모두 지원).
 
         Args:
@@ -135,26 +126,25 @@ class AirdropBot:
         Returns:
             계정 정보 딕셔너리의 리스트
         """
-        env_keys = self._get_env_keys()
-        accounts = self._load_all_accounts(env_keys)
+        accounts = self._load_all_accounts(("BITHUMB_API_KEY", "BITHUMB_SECRET_KEY"))
 
         logger.info(f"로드된 계정 수: {len(accounts)}")
         return accounts
     
-    def create_exchange(self, account_info: AccountInfo) -> BaseExchange:
-        """계정 정보를 바탕으로 거래소 객체를 생성합니다.
+    def create_client(self, account_info: AccountInfo) -> BaseExchangeClient:
+        """계정 정보를 바탕으로 빗썸 클라이언트를 생성합니다.
 
         Args:
             account_info: 계정 정보.
 
         Returns:
-            거래소 객체.
+            빗썸 클라이언트 객체.
         """
         credentials = {'apiKey': account_info['api_key'], 'secret': account_info['api_secret']}
-        return BithumbExchange(credentials)
+        return BithumbExchangeClient(credentials)
     
     def _execute_buy_order(
-        self, exchange: BaseExchange, symbol: str, account_id: str
+        self, exchange: BaseExchangeClient, symbol: str, account_id: str
     ) -> Optional[dict[str, Any]]:
         """매수 주문을 실행합니다.
         
@@ -176,7 +166,9 @@ class AirdropBot:
             
         return buy_order
     
-    def _wait_for_balance(self, exchange: BaseExchange, coin: str, account_id: str) -> float:
+    def _wait_for_balance(
+        self, exchange: BaseExchangeClient, coin: str, account_id: str
+    ) -> float:
         """매수 후 잔고를 확인합니다. 최대 3회 재시도합니다.
         
         Args:
@@ -206,7 +198,7 @@ class AirdropBot:
         return available_amount
     
     def _execute_sell_order(
-        self, exchange: BaseExchange, symbol: str, amount: float, account_id: str
+        self, exchange: BaseExchangeClient, symbol: str, amount: float, account_id: str
     ) -> Optional[dict[str, Any]]:
         """매도 주문을 실행합니다.
         
@@ -284,7 +276,7 @@ class AirdropBot:
         try:
             logger.info(f"[{account_id}] 에어드랍 이벤트 시작")
             
-            exchange = self.create_exchange(account_info)
+            exchange = self.create_client(account_info)
             symbol = f"{symbol.upper()}/KRW"
             
             self._log_balance(exchange, account_id, "초기")
@@ -322,7 +314,9 @@ class AirdropBot:
             self._report_result(account_id, symbol, False, error=str(e))
             return False
     
-    def _log_balance(self, exchange: BaseExchange, account_id: str, prefix: str = "") -> None:
+    def _log_balance(
+        self, exchange: BaseExchangeClient, account_id: str, prefix: str = ""
+    ) -> None:
         """KRW 잔고를 로깅합니다.
         
         Args:
@@ -435,7 +429,7 @@ class AirdropBot:
             accounts = self.accounts
         
         # 초기 정보 로깅
-        logger.info(f"=== 다중 계정 에어드랍 시작 ===")
+        logger.info("=== 다중 계정 빗썸 에어드랍 시작 ===")
         logger.info(f"참여 계정 수: {len(accounts)}")
         logger.info(f"거래 심볼: {', '.join(symbols)}")
         logger.info(f"거래 금액: {self.trade_amount:,.0f} KRW (코인당)")
@@ -534,7 +528,7 @@ class AirdropBot:
         return small_holdings
     
     def _process_single_coin_cleanup(
-        self, exchange: BaseExchange, coin: str, account_id: str
+        self, exchange: BaseExchangeClient, coin: str, account_id: str
     ) -> bool:
         """단일 코인에 대해 추가 매수 후 전량 매도를 수행합니다.
         
@@ -596,11 +590,6 @@ class AirdropBot:
             'total_cleaned': 0
         }
         
-        # 빗썸 거래소만 지원
-        if self.exchange_name != 'bithumb':
-            logger.info(f"[{account_id}] 소액 정리는 빗썸 거래소만 지원합니다.")
-            return results
-        
         try:
             logger.info(f"[{account_id}] 소액 코인 정리 시작")
             
@@ -609,7 +598,7 @@ class AirdropBot:
                 'apiKey': account_info['api_key'],
                 'secret': account_info['api_secret']
             }
-            exchange = BithumbExchange(credentials)
+            exchange = BithumbExchangeClient(credentials)
             
             # 잔고 조회
             balance = exchange.get_balance()
@@ -677,10 +666,6 @@ class AirdropBot:
             max_workers: 동시 실행할 최대 스레드 수
             accounts: 사용할 계정 리스트 (기본값: 모든 계정)
         """
-        if self.exchange_name != 'bithumb':
-            logger.info("현재 소액 정리는 빗썸 거래소만 지원합니다.")
-            return
-        
         # 계정이 지정되지 않으면 모든 계정 사용
         if accounts is None:
             accounts = self.accounts

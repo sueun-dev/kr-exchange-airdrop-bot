@@ -7,14 +7,14 @@ from abc import ABC, abstractmethod
 from typing import Any, Mapping, Optional
 
 
-class BaseExchange(ABC):
+class BaseExchangeClient(ABC):
     """Abstract base class for exchange clients."""
 
     def __init__(self, exchange_id: str, api_credentials: Mapping[str, str]) -> None:
         """Initializes an exchange client.
 
         Args:
-            exchange_id: 거래소 ID (upbit, bithumb)
+            exchange_id: 거래소 ID (현재는 bithumb만 사용)
             api_credentials: API 인증 정보
         """
         self.exchange_id = exchange_id

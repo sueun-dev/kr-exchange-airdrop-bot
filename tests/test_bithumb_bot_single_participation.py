@@ -5,8 +5,8 @@ from typing import Any, Optional
 
 import pytest
 
-from exchange_event.airdrop_event import AirdropBot
-from exchange_event.types import AccountInfo
+from bithumb_airdrop_bot.bot import BithumbAirdropBot
+from bithumb_airdrop_bot.models import AccountInfo
 
 
 class _FakeExchange:
@@ -32,13 +32,13 @@ class _FakeExchange:
 
 
 def test_participate_event_single_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    bot = AirdropBot("bithumb")
+    bot = BithumbAirdropBot()
     bot.wait_time = 0
 
     account: AccountInfo = {"account_id": "account_1", "api_key": "k", "api_secret": "s"}
     fake_exchange = _FakeExchange(buy_ok=True)
 
-    monkeypatch.setattr(bot, "create_exchange", lambda account_info: fake_exchange)
+    monkeypatch.setattr(bot, "create_client", lambda account_info: fake_exchange)
     monkeypatch.setattr(time, "sleep", lambda *_args, **_kwargs: None)
 
     assert bot.participate_event_single(account, "BTC") is True
@@ -50,12 +50,12 @@ def test_participate_event_single_success(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_participate_event_single_buy_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    bot = AirdropBot("bithumb")
+    bot = BithumbAirdropBot()
 
     account: AccountInfo = {"account_id": "account_1", "api_key": "k", "api_secret": "s"}
     fake_exchange = _FakeExchange(buy_ok=False)
 
-    monkeypatch.setattr(bot, "create_exchange", lambda account_info: fake_exchange)
+    monkeypatch.setattr(bot, "create_client", lambda account_info: fake_exchange)
     monkeypatch.setattr(time, "sleep", lambda *_args, **_kwargs: None)
 
     assert bot.participate_event_single(account, "BTC") is False

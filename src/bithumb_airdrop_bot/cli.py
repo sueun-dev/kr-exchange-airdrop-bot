@@ -1,4 +1,4 @@
-"""Command-line interface for the exchange event bot."""
+"""Command-line interface for the Bithumb airdrop bot."""
 
 from __future__ import annotations
 
@@ -12,13 +12,12 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from exchange_event.airdrop_event import AirdropBot
-from exchange_event.logging_config import configure_logging, default_log_file
-from exchange_event.types import AccountInfo
+from bithumb_airdrop_bot.bot import BithumbAirdropBot
+from bithumb_airdrop_bot.logging_config import configure_logging, default_log_file
+from bithumb_airdrop_bot.models import AccountInfo
 
 logger = logging.getLogger(__name__)
 
-EXCHANGE_NAME = "bithumb"
 KST = ZoneInfo("Asia/Seoul")
 SCHEDULED_WAIT_TIME_SECONDS = 2
 SCHEDULE_HOUR = 0
@@ -155,7 +154,9 @@ def _wait_until(target: datetime) -> None:
 
 
 @contextmanager
-def _temporary_wait_time(bot: AirdropBot, wait_time_seconds: int) -> Iterator[None]:
+def _temporary_wait_time(
+    bot: BithumbAirdropBot, wait_time_seconds: int
+) -> Iterator[None]:
     original_wait_time = bot.wait_time
     bot.wait_time = wait_time_seconds
     try:
@@ -165,7 +166,7 @@ def _temporary_wait_time(bot: AirdropBot, wait_time_seconds: int) -> Iterator[No
 
 
 def _run_once(
-    bot: AirdropBot,
+    bot: BithumbAirdropBot,
     symbols: list[str],
     max_workers: int,
     accounts: list[AccountInfo],
@@ -181,7 +182,7 @@ def _run_once(
 
 
 def _run_multi_day(
-    bot: AirdropBot,
+    bot: BithumbAirdropBot,
     symbols: list[str],
     max_workers: int,
     accounts: list[AccountInfo],
@@ -232,10 +233,10 @@ def main() -> None:
     configure_logging(log_file=default_log_file())
     load_dotenv()
 
-    logger.info("=== 에어드랍 이벤트(사고 팔기) 자동 참여 시스템 ===")
+    logger.info("=== 빗썸 에어드랍 자동 참여 봇 ===")
     logger.info("(빗썸 전용)")
 
-    bot = AirdropBot(EXCHANGE_NAME)
+    bot = BithumbAirdropBot()
     if not bot.accounts:
         logger.error("등록된 계정이 없습니다.")
         logger.info("\n.env 파일에 다음 형식으로 API 키를 추가하세요:")
@@ -260,8 +261,8 @@ def main() -> None:
         logger.info("\n=== 지갑 잔액 확인 중... ===")
         for account in selected_accounts:
             try:
-                exchange = bot.create_exchange(account)
-                balance_info = exchange.get_balance_summary()
+                client = bot.create_client(account)
+                balance_info = client.get_balance_summary()
                 logger.info("\n[%s] 잔액 정보:", account["account_id"])
                 logger.info("  - 원화: %,.0f KRW", balance_info["krw"])
                 logger.info("  - 총 평가금액: %,.0f KRW", balance_info["total_krw"])
@@ -297,7 +298,7 @@ def main() -> None:
     )
 
     logger.info("\n=== 설정 확인 ===")
-    logger.info("거래소: %s", EXCHANGE_NAME)
+    logger.info("거래소: bithumb")
     logger.info("선택된 계정: %d개", len(selected_accounts))
     for account in selected_accounts:
         logger.info("  - %s", account["account_id"])
@@ -306,7 +307,11 @@ def main() -> None:
     logger.info("대기 시간: %d초", bot.wait_time)
     logger.info("이벤트 기간: %d일", event_days)
     if event_days > 1:
-        logger.info("2일차부터: 매일 오전 %02d:%02d (KST)에 자동 실행", SCHEDULE_HOUR, SCHEDULE_MINUTE)
+        logger.info(
+            "2일차부터: 매일 오전 %02d:%02d (KST)에 자동 실행",
+            SCHEDULE_HOUR,
+            SCHEDULE_MINUTE,
+        )
     if len(selected_accounts) > 1:
         logger.info("동시 실행: %d개 계정", max_workers)
     if cleanup_small_holdings:
@@ -336,4 +341,3 @@ def main() -> None:
     except Exception as exc:
         logger.exception("오류 발생: %s", exc)
         sys.exit(1)
-

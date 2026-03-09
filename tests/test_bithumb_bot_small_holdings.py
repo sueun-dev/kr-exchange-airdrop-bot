@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from exchange_event.airdrop_event import AirdropBot
+from bithumb_airdrop_bot.bot import BithumbAirdropBot
 
 
 def test_identify_small_holdings_filters_and_prices() -> None:
-    bot = AirdropBot("bithumb")
+    bot = BithumbAirdropBot()
 
     balance = {
         "KRW": {"free": 10000.0, "used": 0.0, "total": 10000.0},

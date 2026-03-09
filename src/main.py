@@ -1,11 +1,11 @@
 """Backwards-compatible entrypoint.
 
-Prefer running `python -m exchange_event` or `uv run python -m exchange_event`.
+Prefer running `python -m bithumb_airdrop_bot` or `uv run bithumb-airdrop-bot`.
 """
 
 from __future__ import annotations
 
-from exchange_event.cli import main
+from bithumb_airdrop_bot.cli import main
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 
 import requests
 
-from exchange_event.exchanges.base import BaseExchange
+from bithumb_airdrop_bot.clients.base import BaseExchangeClient
 
 API_URL = "https://api.bithumb.com"
 MAX_REQUEST_ATTEMPTS = 3
@@ -22,8 +22,8 @@ _NONCE_LOCK = Lock()
 _LAST_NONCE_BY_API_KEY: dict[str, int] = {}
 
 
-class BithumbExchange(BaseExchange):
-    
+class BithumbExchangeClient(BaseExchangeClient):
+
     def __init__(self, api_credentials: Mapping[str, str]) -> None:
         """Initializes a Bithumb exchange client.
 
@@ -38,7 +38,7 @@ class BithumbExchange(BaseExchange):
         api_key = api_credentials.get('apiKey')
         api_secret = api_credentials.get('secret')
         if not api_key or not api_secret:
-            raise ValueError("BithumbExchange requires apiKey and secret")
+            raise ValueError("BithumbExchangeClient requires apiKey and secret")
         self.api_key = api_key
         self.api_secret = api_secret
         

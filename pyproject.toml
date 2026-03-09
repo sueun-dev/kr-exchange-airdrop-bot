@@ -1,7 +1,7 @@
 [project]
-name = "exchange-event"
+name = "bithumb-airdrop-bot"
 version = "0.1.0"
-description = "Automated airdrop event participation system for Korean exchanges"
+description = "Bithumb-only airdrop event automation bot"
 requires-python = ">=3.9"
 dependencies = [
     "python-dotenv>=1.0.0",
@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-exchange-event = "exchange_event.cli:main"
+bithumb-airdrop-bot = "bithumb_airdrop_bot.cli:main"
 
 [project.optional-dependencies]
 dev = [

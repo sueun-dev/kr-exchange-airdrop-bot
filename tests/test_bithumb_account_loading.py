@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from exchange_event.airdrop_event import AirdropBot
+from bithumb_airdrop_bot.bot import BithumbAirdropBot
 
 
 def _clear_bithumb_env() -> None:
@@ -23,7 +23,7 @@ def test_load_accounts_prefers_numbered_keys(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("BITHUMB_API_KEY_2", "key_2")
     monkeypatch.setenv("BITHUMB_SECRET_KEY_2", "secret_2")
 
-    bot = AirdropBot("bithumb")
+    bot = BithumbAirdropBot()
 
     assert [account["account_id"] for account in bot.accounts] == ["account_1", "account_2"]
     assert bot.accounts[0]["api_key"] == "key_1"
@@ -36,7 +36,7 @@ def test_load_accounts_falls_back_to_legacy_keys(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("BITHUMB_API_KEY", "legacy_key")
     monkeypatch.setenv("BITHUMB_SECRET_KEY", "legacy_secret")
 
-    bot = AirdropBot("bithumb")
+    bot = BithumbAirdropBot()
 
     assert [account["account_id"] for account in bot.accounts] == ["account_1"]
     assert bot.accounts[0]["api_key"] == "legacy_key"
@@ -45,7 +45,7 @@ def test_load_accounts_falls_back_to_legacy_keys(monkeypatch: pytest.MonkeyPatch
 def test_load_accounts_returns_empty_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_bithumb_env()
 
-    bot = AirdropBot("bithumb")
+    bot = BithumbAirdropBot()
 
     assert bot.accounts == []
 
@@ -60,7 +60,7 @@ def test_load_accounts_supports_non_contiguous_numbered_keys(
     monkeypatch.setenv("BITHUMB_API_KEY_3", "key_3")
     monkeypatch.setenv("BITHUMB_SECRET_KEY_3", "secret_3")
 
-    bot = AirdropBot("bithumb")
+    bot = BithumbAirdropBot()
 
     assert [account["account_id"] for account in bot.accounts] == ["account_1", "account_3"]
     assert bot.accounts[1]["api_key"] == "key_3"
@@ -75,6 +75,6 @@ def test_load_accounts_returns_empty_for_incomplete_numbered_pairs(
     monkeypatch.setenv("BITHUMB_API_KEY", "legacy_key")
     monkeypatch.setenv("BITHUMB_SECRET_KEY", "legacy_secret")
 
-    bot = AirdropBot("bithumb")
+    bot = BithumbAirdropBot()
 
     assert bot.accounts == []
